@@ -21,7 +21,7 @@ Raw logs ──▶ Trajectory IR ──▶ Invariants ──▶ Checker ──�
 python -m venv .venv
 .venv/Scripts/activate          # Windows; use `source .venv/bin/activate` on Linux/Mac
 pip install -r requirements.txt
-cp .env.example .env            # Fill in your Azure or TRAPI endpoint detailsdetails
+cp .env.example .env            # Fill in your Azure or TRAPI endpoint details
 
 # Run the full pipeline end-to-end
 python run.py trajectory.json
