@@ -534,6 +534,7 @@ Expected output:
 def llm_ir(
     trajectories: List[Dict[str, Any]],
     *,
+    endpoint: str = "azure",
     max_retries: int = 5,
     verbose: bool = True,
 ) -> List[Dict[str, Any]]:
@@ -543,16 +544,19 @@ def llm_ir(
     Sends each raw trajectory to an LLM with the IR schema + rules, parses
     the response, validates with validate_ir(), and retries (feeding the
     validation error back) until success or max_retries is exhausted.
-
-    The LLM client is created lazily using the same TRAPI pattern as the
-    rest of the codebase.
     """
-    # Lazy-import to avoid circular deps and heavy init at import time
-    from llm_clients.trapi import LLMAgent as LLMAgentTrapi
     import pipeline.globals as g
 
-    client = LLMAgentTrapi.trapi_mk_client()
-    model = g.TRAPI_DEPLOYMENT_NAME
+    if endpoint == "azure":
+        from llm_clients.azure import LLMAgent as LLMAgentAzure
+        client = LLMAgentAzure.azure_mk_client()
+        model = g.DEPLOYMENT
+    elif endpoint == "trapi":
+        from llm_clients.trapi import LLMAgent as LLMAgentTrapi
+        client = LLMAgentTrapi.trapi_mk_client()
+        model = g.TRAPI_DEPLOYMENT_NAME
+    else:
+        raise ValueError(f"Unknown endpoint: {endpoint!r}. Expected 'azure' or 'trapi'.")
 
     results: List[Dict[str, Any]] = []
 
@@ -589,6 +593,12 @@ def llm_ir(
                 )
             except Exception as api_err:
                 last_error = f"API error: {api_err}"
+                if "context_length_exceeded" in str(api_err):
+                    raise RuntimeError(
+                        f"Trajectory {t_idx} exceeds the model's context window. "
+                        f"Use a model with a larger context limit or split the trajectory file.\n"
+                        f"{api_err}"
+                    )
                 if verbose:
                     print(f"[LLM-IR]   API error: {api_err}", flush=True)
                 continue
