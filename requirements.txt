@@ -1,3 +1,6 @@
+# Development / testing
+pytest>=9.0
+
 # Core dependencies actually used by AgentRx
 azure-ai-inference>=1.0.0b9
 azure-core>=1.38.0
