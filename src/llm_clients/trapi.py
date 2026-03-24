@@ -1,4 +1,4 @@
-import os 
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,8 +17,9 @@ class LLMAgent:
             api_version,
             model_name,
             model_version,
-            deployment_name):
-        self.scope = os.getenv("SCOPE", "")
+            deployment_name,
+            scope=None):
+        self.scope = scope or os.getenv("SCOPE", "")
         self.credential = get_bearer_token_provider(
         ChainedTokenCredential(AzureCliCredential(), ManagedIdentityCredential()),
         self.scope,
@@ -39,10 +40,10 @@ class LLMAgent:
             messages=messages
         )
         return response
-    
+
     @staticmethod
-    def trapi_mk_client() -> AzureOpenAI:
-        scope = os.getenv("SCOPE", "")
+    def trapi_mk_client(scope=None) -> AzureOpenAI:
+        scope = scope or os.getenv("SCOPE", "")
         credential = get_bearer_token_provider(
             ChainedTokenCredential(AzureCliCredential(), ManagedIdentityCredential()),
             scope,
