@@ -17,7 +17,11 @@ Raw logs ──▶ Trajectory IR ──▶ Invariants ──▶ Checker ──�
 ## Quick Start
 
 ```bash
+# Setup
+python -m venv .venv
+.venv/Scripts/activate          # Windows; use `source .venv/bin/activate` on Linux/Mac
 pip install -r requirements.txt
+cp .env.example .env            # Fill in your Azure or TRAPI endpoint detailsdetails
 
 # Run the full pipeline end-to-end
 python run.py trajectory.json
@@ -103,17 +107,25 @@ agentverify/
 
 LLM settings are loaded from environment variables (via `.env` or shell):
 
+Copy the template and fill in your values:
 ```bash
-# TRAPI (default endpoint)
-AGENT_VERIFY_TRAPI_INSTANCE=          # e.g., "my-instance/my-pool"
-AGENT_VERIFY_TRAPI_DEPLOYMENT_NAME=   # e.g., "my-deployment-name"
+cp .env.example .env
+```
 
-# Azure OpenAI (use --endpoint azure)
+```bash
+# Azure OpenAI (default endpoint)
 AGENT_VERIFY_ENDPOINT=                # e.g., "https://my-resource.openai.azure.com/"
 AGENT_VERIFY_DEPLOYMENT=              # e.g., "gpt-5"
+
+# TRAPI (Microsoft Research internal, use --endpoint trapi)
+AGENT_VERIFY_TRAPI_INSTANCE=          # e.g., "my-instance/my-pool"
+AGENT_VERIFY_TRAPI_DEPLOYMENT_NAME=   # e.g., "my-deployment-name"
+SCOPE=                                # Azure AD scope for TRAPI
 ```
 
 Both endpoints use **Azure AD token-based auth** (`az login` or Managed Identity).
+
+> **Note:** TRAPI is a Microsoft Research internal endpoint. External teams should use `--endpoint azure` (default).
 
 ---
 
@@ -140,7 +152,7 @@ Each module can also be run standalone from `src/`:
 
 **Static Invariant Generator** — generate policy/tool invariants:
 ```bash
-python src/invariants/static_invariant_generator.py --input-path trajectory.json --domain tau --endpoint trapi
+python src/invariants/static_invariant_generator.py --input-path trajectory.json --domain tau
 ```
 
 **Dynamic Invariant Generator** — generate per-step context-aware invariants:
@@ -155,7 +167,7 @@ python src/invariants/checker.py --input-path trajectory.json --static-invariant
 
 **Judge** — run LLM-as-a-Judge classification:
 ```bash
-python src/judge/judge.py --domain tau --log_file trajectory.json --endpoint trapi --mode combined
+python src/judge/judge.py --domain tau --log_file trajectory.json --mode combined
 ```
 
 ---
@@ -171,6 +183,19 @@ This project uses the following third-party open source packages (installed via 
 - **httpx** — HTTP client (BSD License)
 
 See [requirements.txt](requirements.txt) for the full list of dependencies.
+
+---
+
+## Troubleshooting
+
+### `DefaultAzureCredential` timeout on local machines
+
+The Azure SDK's `DefaultAzureCredential` tries `ManagedIdentityCredential` before `AzureCliCredential`. On a local dev machine this probes the IMDS endpoint which doesn't exist locally, causing a ~5-10s timeout before falling back. This is a [known Azure SDK issue](https://github.com/Azure/azure-sdk-for-python/issues/35452).
+
+**Workaround:** retry (the token gets cached), or warm the cache first:
+```bash
+.venv/Scripts/python -c "from azure.identity import AzureCliCredential; AzureCliCredential().get_token('https://cognitiveservices.azure.com/.default'); print('Token cached')"
+```
 
 ---
 
