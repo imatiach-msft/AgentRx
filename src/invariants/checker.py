@@ -917,6 +917,11 @@ class AllVerifier:
 
         except Exception as e:
             end = time.perf_counter()
+            if "context_length_exceeded" in str(e):
+                raise RuntimeError(
+                    f"NL check prompt too large for the model's context window. "
+                    f"Use a model with a larger context limit or set SKIP_NL=1.\n{e}"
+                )
 
             tb = traceback.format_exc()
             if DEBUG_NL_PROMPTS and focus_inv(invariant):
@@ -1065,7 +1070,7 @@ def main():
         dest="client",
         help="Use TRAPI client"
     )
-    parser.set_defaults(client="azure")
+    parser.set_defaults(client=g.DEFAULT_ENDPOINT)
     parser.add_argument("--domain", type=str, default="flash",
                         choices=["flash", "tau", "magentic"],
                         help="Domain to run (default: flash)")
