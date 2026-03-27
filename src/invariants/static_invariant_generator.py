@@ -10,19 +10,19 @@ Supports python_check only or python_check + nl_check (via --include-nl-check)
 
 Usage (run from src/ directory):
   # Tau-retail (python-only invariants, default):
-  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau.json --endpoint trapi
+  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau.json
 
   # Magentic-one:
-  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static_magentic.json --endpoint trapi
+  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static_magentic.json
 
   # With NL check invariants enabled:
-  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau_nl.json --endpoint trapi --include-nl-check
+  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau_nl.json --include-nl-check
 
   # Custom policy document:
   python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static.json --policy-path /path/to/policy.txt
 
-  # Using Azure endpoint instead of TRAPI:
-  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static.json --endpoint azure
+  # Using TRAPI endpoint (Microsoft Research internal):
+  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static.json --endpoint trapi
 
 Also importable for the larger pipeline:
   from invariants.static_invariant_generator import StaticInvariantGenerator
@@ -736,7 +736,7 @@ class StaticInvariantGenerator:
         out_path: str,
         model_name: Optional[str] = None,
         include_nl_check: bool = True,
-        endpoint: str = "trapi",
+        endpoint: str = "azure",
     ) -> None:
         self.traj_for_enums = traj_for_enums
         self.tools_list = [t.strip() for t in (tools_list or []) if (t or "").strip()]
@@ -831,11 +831,19 @@ class StaticInvariantGenerator:
         start_ts = datetime.datetime.now()
         start = time.perf_counter()
 
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            if "context_length_exceeded" in str(e):
+                raise RuntimeError(
+                    f"Trajectory too large for the model's context window. "
+                    f"Use a model with a larger context limit.\n{e}"
+                )
+            raise
 
         end = time.perf_counter()
         end_ts = datetime.datetime.now()
@@ -888,9 +896,9 @@ if __name__ == "__main__":
                         help="Output path for static invariants JSON")
     parser.add_argument("--policy-path", type=str, default=None,
                         help="Path to policy document (default: from domain registry)")
-    parser.add_argument("--endpoint", type=str, default="trapi",
+    parser.add_argument("--endpoint", type=str, default=g.DEFAULT_ENDPOINT,
                         choices=["azure", "trapi"],
-                        help="LLM endpoint to use (default: trapi)")
+                        help="LLM endpoint to use (default: azure)")
     grp = parser.add_mutually_exclusive_group()
     parser.set_defaults(include_nl_check=False)
     grp.add_argument("--include-nl-check", dest="include_nl_check", action="store_true")

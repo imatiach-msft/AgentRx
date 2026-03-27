@@ -35,6 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parent
 SRC_DIR = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
+import pipeline.globals as g
+
 # ---------- Stage definitions ----------
 
 STAGES = ["ir", "static", "dynamic", "check", "judge", "report"]
@@ -91,9 +93,34 @@ def banner(msg: str):
     print(f"{'=' * width}\n")
 
 
+def validate_endpoint_config(endpoint: str):
+    """Validate that required environment variables are set for the chosen endpoint."""
+    missing = []
+    if endpoint == "trapi":
+        if not g.TRAPI_INSTANCE:
+            missing.append("AGENT_VERIFY_TRAPI_INSTANCE")
+        if not g.TRAPI_DEPLOYMENT_NAME:
+            missing.append("AGENT_VERIFY_TRAPI_DEPLOYMENT_NAME")
+        if not os.environ.get("SCOPE", ""):
+            missing.append("SCOPE")
+    elif endpoint == "azure":
+        if not g.ENDPOINT:
+            missing.append("AGENT_VERIFY_ENDPOINT")
+    else:
+        print(f"\nError: Unknown endpoint '{endpoint}'. Must be 'azure' or 'trapi'.")
+        sys.exit(1)
+
+    if missing:
+        print(f"\nError: Missing required environment variables for --endpoint {endpoint}:")
+        for v in missing:
+            print(f"  - {v}")
+        print(f"\nSee .env.example for a template: cp .env.example .env")
+        sys.exit(1)
+
+
 # ---------- Stage: IR ----------
 
-def run_ir(input_path: str, run_dir: str, domain: str, state: dict) -> str:
+def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dict) -> str:
     """Normalize trajectory to IR format. Returns path to IR output."""
     from ir.trajectory_ir import load_trajectories, validate_ir
     from invariants.domain_registry import get_domain_config
@@ -115,7 +142,7 @@ def run_ir(input_path: str, run_dir: str, domain: str, state: dict) -> str:
     if _is_degenerate_ir(data, input_path):
         print("  [INFO] Domain converter produced degenerate IR — falling back to LLM-based converter")
         from ir.trajectory_ir import llm_ir
-        data = llm_ir(raw)
+        data = llm_ir(raw, endpoint=endpoint)
         if not isinstance(data, list):
             data = [data]
         used_llm_fallback = True
@@ -426,7 +453,7 @@ def guess_domain(input_path: str) -> str:
     except Exception:
         pass
 
-    # Default to LLM-based IR (flash uses a reasonable default pipeline)
+    # Default to flash (uses LLM-based IR fallback for unknown formats)
     return "flash"
 
 
@@ -444,7 +471,7 @@ Examples:
   python run.py data/my_trajectory.json --from-stage check   # resume from checking
   python run.py data/my_trajectory.json --skip-dynamic       # faster, no per-step invariants
   python run.py data/my_trajectory.json --skip-judge         # skip LLM judge
-  python run.py data/my_trajectory.json --endpoint trapi     # use TRAPI instead of Azure
+  python run.py data/my_trajectory.json --endpoint trapi     # use TRAPI (Microsoft Research internal)
   python run.py data/my_trajectory.json --run-name my_run    # custom run name
         """,
     )
@@ -452,8 +479,8 @@ Examples:
     parser.add_argument("--domain", default=None,
                         choices=["tau", "flash", "magentic"],
                         help="Domain (auto-detected if not specified)")
-    parser.add_argument("--endpoint", default="trapi", choices=["azure", "trapi"],
-                        help="LLM endpoint (default: trapi)")
+    parser.add_argument("--endpoint", default=g.DEFAULT_ENDPOINT, choices=["azure", "trapi"],
+                        help="LLM endpoint (default: azure). TRAPI is Microsoft Research internal.")
     parser.add_argument("--stage", default=None, choices=STAGES,
                         help="Run ONLY this stage")
     parser.add_argument("--from-stage", default=None, choices=STAGES,
@@ -478,6 +505,9 @@ Examples:
     # Detect domain
     domain = args.domain or guess_domain(input_path)
     print(f"Domain: {domain}")
+
+    # Validate endpoint config before doing any work
+    validate_endpoint_config(args.endpoint)
 
     # Set up run directory
     if args.run_dir:
@@ -532,12 +562,12 @@ Examples:
     try:
         # --- IR ---
         if "ir" in stages_to_run:
-            ir_path = run_ir(input_path, run_dir, domain, state)
+            ir_path = run_ir(input_path, run_dir, domain, args.endpoint, state)
             state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"ir"})
             save_state(run_dir, state)
         elif not os.path.exists(ir_path):
             print("[INFO] Running IR stage (required by later stages)")
-            ir_path = run_ir(input_path, run_dir, domain, state)
+            ir_path = run_ir(input_path, run_dir, domain, args.endpoint, state)
             state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"ir"})
             save_state(run_dir, state)
 

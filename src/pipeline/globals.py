@@ -58,6 +58,10 @@ MAGENTIC_TASK_IDS = [
     "f88066d274e265edd6cd9d61cd80a41accb3a14baf2297652fdd05cdf716d455",
 ]
 
+DEFAULT_ENDPOINT = os.environ.get("AGENT_VERIFY_ENDPOINT_TYPE", "azure")  # "azure" or "trapi"
+if DEFAULT_ENDPOINT not in ("azure", "trapi"):
+    raise ValueError(f"AGENT_VERIFY_ENDPOINT_TYPE must be 'azure' or 'trapi', got: {DEFAULT_ENDPOINT!r}")
+
 TRAPI_INSTANCE = os.environ.get("AGENT_VERIFY_TRAPI_INSTANCE", "")  # See https://aka.ms/trapi/models for the instance name
 TRAPI_ENDPOINT_PREFIX = os.environ.get("AGENT_VERIFY_TRAPI_ENDPOINT_PREFIX", "https://trapi.research.microsoft.com/")
 TRAPI_API_VERSION = os.environ.get("AGENT_VERIFY_TRAPI_API_VERSION", "2025-03-01-preview")  # See: https://learn.microsoft.com/en-us/azure/ai-services/openai/api-version-deprecation#latest-ga-api-release
