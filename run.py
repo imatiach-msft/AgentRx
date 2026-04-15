@@ -122,17 +122,25 @@ def validate_endpoint_config(endpoint: str):
 
 def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dict) -> str:
     """Normalize trajectory to IR format. Returns path to IR output."""
-    from ir.trajectory_ir import load_trajectories, validate_ir
+    from ir.trajectory_ir import load_trajectories, validate_ir, markdown_ir
     from invariants.domain_registry import get_domain_config
 
-    banner("Stage 1/7: IR Normalization")
+    banner("Stage 1/6: IR Normalization")
 
     ir_out_path = os.path.join(run_dir, "trajectory_ir.json")
 
     raw = load_trajectories(input_path)
-    cfg = get_domain_config(domain)
-    ir_fn = cfg.ir_converter
-    data = ir_fn(raw)
+
+    # If the loader detected markdown format, use the dedicated markdown IR
+    # converter instead of the domain converter (which doesn't understand it)
+    is_markdown = any(t.get("_markdown_ir") for t in raw)
+    if is_markdown:
+        print("  [INFO] Markdown conversation detected — using markdown IR converter")
+        data = markdown_ir(raw)
+    else:
+        cfg = get_domain_config(domain)
+        ir_fn = cfg.ir_converter
+        data = ir_fn(raw)
 
     if not isinstance(data, list):
         data = [data]
@@ -148,6 +156,7 @@ def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dic
         used_llm_fallback = True
 
     state["ir_used_llm_fallback"] = used_llm_fallback
+    state["ir_from_markdown"] = is_markdown
     if used_llm_fallback:
         print("  [INFO] Unknown format detected — domain-specific tools will NOT be used")
 
@@ -177,7 +186,7 @@ def run_static(input_path: str, run_dir: str, domain: str, endpoint: str,
     from invariants.static_invariant_generator import StaticInvariantGenerator
     from invariants.domain_registry import get_domain_config
 
-    banner("Stage 2/7: Static Invariant Generation")
+    banner("Stage 2/6: Static Invariant Generation")
 
     out_path = os.path.join(run_dir, "static_invariants.json")
     cfg = get_domain_config(domain)
@@ -189,13 +198,13 @@ def run_static(input_path: str, run_dir: str, domain: str, endpoint: str,
         ir_data = json.load(f)
     sample_traj = ir_data[0] if isinstance(ir_data, list) else ir_data
 
-    # If the domain converter failed (LLM fallback was used), don't inject
-    # domain-specific tools — they're irrelevant to this trajectory format
-    if used_llm_fallback:
+    # If the domain converter failed (LLM fallback was used) or the input is
+    # markdown, don't inject domain-specific tools — they're irrelevant
+    if used_llm_fallback or state.get("ir_from_markdown", False):
         tools_list = []
         tools_structure = None
         policy_path = None
-        print("  [INFO] Using empty tools (LLM IR fallback was used — domain tools don't apply)")
+        print("  [INFO] Using empty tools (domain tools don't apply to this trajectory format)")
     else:
         tools_list = cfg.tools_list
         tools_structure = cfg.tools_structure
@@ -229,7 +238,7 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
     from invariants.dynamic_invariant_generator import DynamicInvariantGenerator
     from invariants.domain_registry import get_domain_config
 
-    banner("Stage 3/7: Dynamic Invariant Generation")
+    banner("Stage 3/6: Dynamic Invariant Generation")
 
     out_dir = os.path.join(run_dir, "dynamic_invariants")
     ensure_dir(out_dir)
@@ -237,10 +246,10 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
     cfg = get_domain_config(domain)
     used_llm_fallback = state.get("ir_used_llm_fallback", False)
 
-    if used_llm_fallback:
+    if used_llm_fallback or state.get("ir_from_markdown", False):
         tools_list = []
         tools_structure = None
-        print("  [INFO] Using empty tools (LLM IR fallback was used — domain tools don't apply)")
+        print("  [INFO] Using empty tools (domain tools don't apply to this trajectory format)")
     else:
         tools_list = cfg.tools_list
         tools_structure = cfg.tools_structure
@@ -255,9 +264,9 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
         endpoint=endpoint,
     )
 
-    if used_llm_fallback:
-        # Use the already-converted IR file instead of re-running
-        # the domain converter (which would produce degenerate output)
+    if used_llm_fallback or state.get("ir_from_markdown", False):
+        # Use the already-converted IR file instead of re-reading the raw file
+        # (which would go through the wrong domain converter)
         ir_path = os.path.join(run_dir, "trajectory_ir.json")
         with open(ir_path, "r", encoding="utf-8") as f:
             ir_data = json.load(f)
@@ -280,7 +289,7 @@ def run_check(ir_path: str, run_dir: str, domain: str, endpoint: str,
     from ir.trajectory_ir import load_trajectories
     from invariants.domain_registry import get_domain_config
 
-    banner("Stage 4/7: Invariant Checking")
+    banner("Stage 4/6: Invariant Checking")
 
     results_dir = os.path.join(run_dir, "checker_results")
     ensure_dir(results_dir)
@@ -351,7 +360,7 @@ def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
     """Run LLM-as-a-Judge. Returns path to judge output directory."""
     import judge.judge as judge_module
 
-    banner("Stage 6/7: LLM-as-a-Judge")
+    banner("Stage 5/6: LLM-as-a-Judge")
 
     judge_out_dir = os.path.join(run_dir, "judge_output")
     ensure_dir(judge_out_dir)
@@ -367,14 +376,29 @@ def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
     if violation_context_dir:
         judge_module.VIOLATION_CONTEXT_DIR = violation_context_dir
 
+    # --- DEBUG: Log all inputs to the judge stage ---
+    print(f"\n  [DEBUG][run_judge] input_path:            {input_path}")
+    print(f"  [DEBUG][run_judge] run_dir:               {run_dir}")
+    print(f"  [DEBUG][run_judge] domain:                {domain}")
+    print(f"  [DEBUG][run_judge] endpoint:              {endpoint}")
+    print(f"  [DEBUG][run_judge] violation_context_dir: {violation_context_dir}")
+    print(f"  [DEBUG][run_judge] ground_truth_file:     {ground_truth_file}")
+    print(f"  [DEBUG][run_judge] PROMPT_MODE:           {judge_module.PROMPT_MODE}")
+    print(f"  [DEBUG][run_judge] EXECUTION_MODE:        {judge_module.EXECUTION_MODE}")
+    print(f"  [DEBUG][run_judge] RUN_WITH_CONTEXT:      {judge_module.RUN_WITH_CONTEXT}")
+    print(f"  [DEBUG][run_judge] USE_GROUND_TRUTH:      {judge_module.USE_GROUND_TRUTH}")
+
     # Load ground truth if provided
     gt_failures = None
     if ground_truth_file and os.path.exists(ground_truth_file):
         gt_failures = judge_module.load_failures_from_json(ground_truth_file)
+        print(f"  [DEBUG][run_judge] Loaded {len(gt_failures)} ground truth failures")
 
     import pipeline.globals as g
     api_version = g.API_VERSION
     model_name = g.DEPLOYMENT if endpoint == "azure" else g.TRAPI_DEPLOYMENT_NAME
+    print(f"  [DEBUG][run_judge] api_version:           {api_version}")
+    print(f"  [DEBUG][run_judge] model_name:            {model_name}")
 
     # Run a single iteration
     judge_module.run_single_iteration(
@@ -399,7 +423,7 @@ def run_report(judge_out_dir: str, run_dir: str):
         plot_ground_truth_frequency, plot_comparison,
     )
 
-    banner("Stage 7/7: Report Generation")
+    banner("Stage 6/6: Report Generation")
 
     plots_dir = os.path.join(run_dir, "plots")
     ensure_dir(plots_dir)
@@ -499,9 +523,53 @@ Examples:
 
     input_path = os.path.abspath(args.input)
     if not os.path.exists(input_path):
-        print(f"Error: File not found: {input_path}")
+        print(f"Error: Path not found: {input_path}")
         sys.exit(1)
 
+    # If input is a directory, collect all trajectory files and run each one
+    if os.path.isdir(input_path):
+        trajectory_files = sorted(
+            p for p in Path(input_path).rglob("*")
+            if p.is_file() and p.suffix.lower() in (".json", ".jsonl")
+        )
+        if not trajectory_files:
+            print(f"Error: No .json or .jsonl files found in {input_path}")
+            sys.exit(1)
+
+        print(f"Found {len(trajectory_files)} trajectory file(s) in {input_path}:\n")
+        for i, f in enumerate(trajectory_files, 1):
+            print(f"  {i}. {f.relative_to(input_path)}")
+        print()
+
+        results = {}
+        for i, traj_file in enumerate(trajectory_files, 1):
+            banner(f"File {i}/{len(trajectory_files)}: {traj_file.name}")
+            try:
+                run_pipeline(str(traj_file), args)
+                results[str(traj_file)] = "OK"
+            except KeyboardInterrupt:
+                print("\n[INTERRUPTED] Stopping batch run.")
+                results[str(traj_file)] = "INTERRUPTED"
+                break
+            except Exception as e:
+                print(f"\n[ERROR] Failed on {traj_file.name}: {e}")
+                results[str(traj_file)] = f"FAILED: {e}"
+
+        banner("Batch Run Summary")
+        for filepath, status in results.items():
+            name = Path(filepath).name
+            print(f"  {name:50s} {status}")
+        print()
+        failed = sum(1 for s in results.values() if s.startswith("FAILED"))
+        print(f"  {len(results)} processed, {len(results) - failed} succeeded, {failed} failed")
+        print()
+        sys.exit(1 if failed else 0)
+    else:
+        run_pipeline(input_path, args)
+
+
+def run_pipeline(input_path: str, args):
+    """Run the full pipeline on a single trajectory file."""
     # Detect domain
     domain = args.domain or guess_domain(input_path)
     print(f"Domain: {domain}")
@@ -513,7 +581,8 @@ Examples:
     if args.run_dir:
         run_dir = os.path.abspath(args.run_dir)
     else:
-        run_name = args.run_name or f"{domain}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        stem = Path(input_path).stem
+        run_name = args.run_name or f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         run_dir = os.path.join(str(REPO_ROOT), "runs", run_name)
     ensure_dir(run_dir)
 
@@ -619,14 +688,14 @@ Examples:
         print("\n\n[INTERRUPTED] Progress saved. Resume with:")
         not_done = [s for s in stages_to_run if s not in state.get("completed_stages", [])]
         if not_done:
-            print(f"  python run.py {args.input} --run-dir {run_dir} --from-stage {not_done[0]}")
-        sys.exit(1)
+            print(f"  python run.py {input_path} --run-dir {run_dir} --from-stage {not_done[0]}")
+        raise
     except Exception as e:
         print(f"\n[ERROR] Stage failed: {e}")
         not_done = [s for s in stages_to_run if s not in state.get("completed_stages", [])]
         if not_done:
             print(f"\nResume with:")
-            print(f"  python run.py {args.input} --run-dir {run_dir} --from-stage {not_done[0]}")
+            print(f"  python run.py {input_path} --run-dir {run_dir} --from-stage {not_done[0]}")
         raise
 
     elapsed = time.perf_counter() - pipeline_start

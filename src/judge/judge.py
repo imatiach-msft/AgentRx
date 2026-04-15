@@ -32,7 +32,7 @@ try:
     
     # Analysis & Pipeline tools
     from reports.analyze_failure_frequencies import load_and_analyze_json, plot_predicted_frequency, plot_ground_truth_frequency, plot_comparison
-    from ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir, validate_ir, llm_ir
+    from ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir, validate_ir, llm_ir, ensure_ir
     from invariants.domain_registry import DOMAIN_REGISTRY, get_domain_config, register_domain
 except ImportError:
     pass
@@ -800,6 +800,7 @@ def _trajectory_len(traj: Any) -> int:
             total += 1
     return total
 
+
 def _normalize_by_domain(domain: str, raw):
     domain = (domain or "").strip().lower()
     # If the domain is already registered, use its converter
@@ -1055,10 +1056,10 @@ def convert_to_failure_case(case_input):
 
 def judge_trajectories(log_file, num_runs=1, ground_truth_task_ids=None):
     """
-    Judge trajectories from a log file.
+    Judge trajectories from an IR-format file (trajectory_ir.json).
     
     Args:
-        log_file: Path to trajectory log file or directory
+        log_file: Path to IR trajectory file (produced by Stage 1)
         num_runs: Number of evaluation runs
         ground_truth_task_ids: Optional set of task IDs to filter trajectories. 
                               If provided, only trajectories with matching IDs are processed.
@@ -1075,31 +1076,12 @@ def judge_trajectories(log_file, num_runs=1, ground_truth_task_ids=None):
 
     judge = LLMJudge(api_version=api_version, model_name=model_name, model_version=model_version, deployment_name=deployment_name)
     
-    # Load Data
-    domain_norm = (DOMAIN or "").strip().lower()
-    
     try:
-        raw = []
-        if os.path.isdir(log_file):
-            # directory mode - try both .jsonl and .json files
-            for pattern in ["*.jsonl", "*.json"]:
-                for _path, trajs in iter_load_trajectories_from_dir(log_file, pattern=pattern):
-                    if isinstance(trajs, list):
-                        raw.extend(trajs)
-                    else:
-                        raw.append(trajs)
-        else:
-            raw = load_trajectories(log_file)
-        if domain_norm == "synth":
-            fn = get_or_build_synth_normalizer(judge, raw)
-            data = fn(raw)
-            if DEBUG_SYNTH:
-                print(f"### DEBUG_SYNTH: normalized synth trajectories: count={len(data)}")
-        
-        else:
-            data = _normalize_by_domain(DOMAIN, raw)
+        # Auto-detect: if the file is already IR, use it directly;
+        # otherwise convert from raw using the domain converter.
+        data = ensure_ir(log_file, DOMAIN)
 
-        print(f"### DEBUG: normalized trajectories: count={len(data)}")
+        print(f"### DEBUG: loaded IR trajectories: count={len(data)}")
         #if domain_norm == "magentic":
         #    magentic_task_ids_set = set(g.FILTERED_TASKS_MAGENTIC)
         #    original_count = len(data)

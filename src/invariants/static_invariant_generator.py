@@ -10,19 +10,19 @@ Supports python_check only or python_check + nl_check (via --include-nl-check)
 
 Usage (run from src/ directory):
   # Tau-retail (python-only invariants, default):
-  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau.json
+  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau.json --endpoint trapi
 
   # Magentic-one:
-  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static_magentic.json
+  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static_magentic.json --endpoint trapi
 
   # With NL check invariants enabled:
-  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau_nl.json --include-nl-check
+  python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static_tau_nl.json --endpoint trapi --include-nl-check
 
   # Custom policy document:
   python -m invariants.static_invariant_generator --domain tau --input-path ../trajectories/tau-retail/instruction_adherence_failure.json --out-path out/static.json --policy-path /path/to/policy.txt
 
-  # Using TRAPI endpoint (Microsoft Research internal):
-  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static.json --endpoint trapi
+  # Using Azure endpoint instead of TRAPI:
+  python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static.json --endpoint azure
 
 Also importable for the larger pipeline:
   from invariants.static_invariant_generator import StaticInvariantGenerator
@@ -315,8 +315,7 @@ IMPORTANT: Follow this schema EXACTLY. Do not add extra fields. Use correct JSON
   | ANY",
 
   "event_trigger": {
-    "step_index": "int",
-    "substep_index": "int (optional, if not specified, invariant triggers on the whole step)",
+    "step_index": "*|int|range",  // IMPORTANT: Use "*" for invariants that should be checked at EVERY step. Only use a specific int when the invariant applies to one particular step.    "substep_index": "int (optional, if not specified, invariant triggers on the whole step)",
     "role_name": "<<AGENT_UNION>>"  // agent names derived from trajectory; "*" matches all; "*" matches all
     },
 
@@ -736,7 +735,7 @@ class StaticInvariantGenerator:
         out_path: str,
         model_name: Optional[str] = None,
         include_nl_check: bool = True,
-        endpoint: str = "azure",
+        endpoint: str = "trapi",
     ) -> None:
         self.traj_for_enums = traj_for_enums
         self.tools_list = [t.strip() for t in (tools_list or []) if (t or "").strip()]
@@ -831,19 +830,23 @@ class StaticInvariantGenerator:
         start_ts = datetime.datetime.now()
         start = time.perf_counter()
 
-        try:
-            resp = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-        except Exception as e:
-            if "context_length_exceeded" in str(e):
-                raise RuntimeError(
-                    f"Trajectory too large for the model's context window. "
-                    f"Use a model with a larger context limit.\n{e}"
+        from openai import RateLimitError as _RLE
+        _static_retries = 5
+        for _attempt in range(_static_retries):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
                 )
-            raise
+                break
+            except _RLE:
+                if _attempt < _static_retries - 1:
+                    _wait = 4 * (2 ** _attempt)
+                    print(f"[RATE LIMIT] Static gen retry in {_wait}s ({_attempt+1}/{_static_retries})", flush=True)
+                    time.sleep(_wait)
+                else:
+                    raise
 
         end = time.perf_counter()
         end_ts = datetime.datetime.now()
@@ -896,9 +899,9 @@ if __name__ == "__main__":
                         help="Output path for static invariants JSON")
     parser.add_argument("--policy-path", type=str, default=None,
                         help="Path to policy document (default: from domain registry)")
-    parser.add_argument("--endpoint", type=str, default=g.DEFAULT_ENDPOINT,
+    parser.add_argument("--endpoint", type=str, default="trapi",
                         choices=["azure", "trapi"],
-                        help="LLM endpoint to use (default: azure)")
+                        help="LLM endpoint to use (default: trapi)")
     grp = parser.add_mutually_exclusive_group()
     parser.set_defaults(include_nl_check=False)
     grp.add_argument("--include-nl-check", dest="include_nl_check", action="store_true")

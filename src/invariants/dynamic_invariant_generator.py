@@ -46,7 +46,7 @@ CLI flags:
   --input-path PATH                 Trajectory file or directory of .json/.jsonl files
   --out-dir DIR                     Output directory (default: dynamic_invariant_outputs)
   --static-invariants PATH          Path to static invariants JSON
-  --endpoint {azure,trapi}          LLM endpoint (default: azure)
+  --endpoint {trapi,azure}          LLM endpoint (default: trapi)
   --include-nl-check / --no-nl-check  Enable/disable NL check invariants (default: enabled)
 
 Also importable for the larger pipeline:
@@ -67,6 +67,25 @@ from llm_clients.azure import LLMAgent as LLMAgentAzure
 import pipeline.globals as g
 
 from reports.metrics import TokenUsage, TimingInfo, LLMCallTelemetry  # noqa: F401
+
+_RATE_LIMIT_RETRIES = 5
+_RATE_LIMIT_BACKOFF = 4  # seconds
+
+def _llm_call_with_retry(client, model_name, messages, **kwargs):
+    """Wrapper around chat.completions.create with retry on rate limits."""
+    from openai import RateLimitError
+    for attempt in range(_RATE_LIMIT_RETRIES):
+        try:
+            return client.chat.completions.create(
+                model=model_name, messages=messages, **kwargs
+            )
+        except RateLimitError:
+            if attempt < _RATE_LIMIT_RETRIES - 1:
+                wait = _RATE_LIMIT_BACKOFF * (2 ** attempt)
+                print(f"[RATE LIMIT] Retrying in {wait}s (attempt {attempt+1}/{_RATE_LIMIT_RETRIES})", flush=True)
+                time.sleep(wait)
+            else:
+                raise
 
 # ------------------------------------------------------------------------------------
 # CONFIG
@@ -1832,7 +1851,7 @@ class DynamicInvariantGenerator:
         tools_list: Optional[List[str]] = None,
         tools_structure: Optional[Union[dict, str]] = None,
         include_nl_check: bool = True,
-        endpoint: str = "azure",
+        endpoint: str = "trapi",
     ) -> None:
         self.out_dir = abspath_rel(out_dir)
         ensure_dir(self.out_dir)
@@ -1950,19 +1969,11 @@ class DynamicInvariantGenerator:
 
                 dynamic_generation_start_timestamp = datetime.datetime.now()
                 dynamic_generation_start = time.perf_counter()
-                try:
-                    response = self.client.chat.completions.create(
-                        model=self.model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_format={"type": "json_object"},
-                    )
-                except Exception as e:
-                    if "context_length_exceeded" in str(e):
-                        raise RuntimeError(
-                            f"Step {step_num} prompt too large for the model's context window. "
-                            f"Use a model with a larger context limit.\n{e}"
-                        )
-                    raise
+                response = _llm_call_with_retry(
+                    self.client, self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                )
 
                 dynamic_generation_end = time.perf_counter()
                 dynamic_generation_end_timestamp = datetime.datetime.now()
@@ -2122,7 +2133,7 @@ class OneShotDynamicInvariantGenerator:
         tools_list: Optional[List[str]] = None,
         tools_structure: Optional[Union[dict, str]] = None,
         include_nl_check: bool = False,
-        endpoint: str = "azure",
+        endpoint: str = "trapi",
     ) -> None:
         self.out_dir = abspath_rel(out_dir)
         ensure_dir(self.out_dir)
@@ -2209,19 +2220,11 @@ class OneShotDynamicInvariantGenerator:
             start_ts = datetime.datetime.now()
             start = time.perf_counter()
 
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                )
-            except Exception as e:
-                if "context_length_exceeded" in str(e):
-                    raise RuntimeError(
-                        f"Trajectory too large for the model's context window. "
-                        f"Use a model with a larger context limit.\n{e}"
-                    )
-                raise
+            response = _llm_call_with_retry(
+                self.client, self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
 
             end = time.perf_counter()
             end_ts = datetime.datetime.now()
@@ -2574,9 +2577,9 @@ if __name__ == "__main__":
                         help="Output directory for dynamic invariants")
     parser.add_argument("--static-invariants", type=str, default=None,
                         help="Path to static invariants JSON file")
-    parser.add_argument("--endpoint", type=str, default=g.DEFAULT_ENDPOINT,
+    parser.add_argument("--endpoint", type=str, default="trapi",
                         choices=["azure", "trapi"],
-                        help="LLM endpoint to use (default: azure)")
+                        help="LLM endpoint to use (default: trapi)")
     grp = parser.add_mutually_exclusive_group()
     parser.set_defaults(include_nl_check=True)
     grp.add_argument("--include-nl-check", dest="include_nl_check", action="store_true")

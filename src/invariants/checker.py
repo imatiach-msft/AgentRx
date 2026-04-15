@@ -569,6 +569,26 @@ class AllVerifier:
             m.POLICY_TEXT = self.policy_text
             sys.modules["policy_text"] = m
 
+            # Strip redundant import lines for modules already provided in the
+            # sandbox — the restricted builtins intentionally omit __import__ so
+            # bare `import x` would crash with "ImportError: __import__ not found".
+            _provided_modules = {"json", "re", "math", "collections"}
+            sanitized_lines = []
+            for line in code.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("import "):
+                    mod = stripped.split()[1].split(".")[0].rstrip(",")
+                    if mod in _provided_modules:
+                        continue
+                elif stripped.startswith("from ") and " import " in stripped:
+                    mod = stripped.split()[1].split(".")[0]
+                    if mod in _provided_modules:
+                        continue
+                sanitized_lines.append(line)
+            code = "\n".join(sanitized_lines)
+
+            import collections as _collections
+            import math as _math
             _safe_builtins = {
                 "str": str, "int": int, "float": float, "bool": bool,
                 "dict": dict, "list": list, "tuple": tuple, "set": set,
@@ -587,6 +607,8 @@ class AllVerifier:
                 "POLICY_TEXT": self.policy_text,
                 "json": json,
                 "re": re,
+                "math": _math,
+                "collections": _collections,
             }
             loc: Dict[str, Any] = {}
    
@@ -818,15 +840,27 @@ class AllVerifier:
         raw = ""  # allow exception handler to report raw excerpt if available
 
         try:
-            response = self.llm_client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": enhanced_system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                #temperature=0.0,
-                response_format={"type": "json_object"},
-            )
+            from openai import RateLimitError as _RLE
+            _check_retries = 5
+            for _attempt in range(_check_retries):
+                try:
+                    response = self.llm_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[
+                            {"role": "system", "content": enhanced_system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        #temperature=0.0,
+                        response_format={"type": "json_object"},
+                    )
+                    break
+                except _RLE:
+                    if _attempt < _check_retries - 1:
+                        _wait = 4 * (2 ** _attempt)
+                        print(f"[RATE LIMIT] Checker retry in {_wait}s ({_attempt+1}/{_check_retries})", flush=True)
+                        import time as _time; _time.sleep(_wait)
+                    else:
+                        raise
             end = time.perf_counter()
 
             tokens_used = 0

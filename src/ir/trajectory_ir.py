@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import json, os, re, time
 
 Event = Dict[str, Any]
@@ -47,6 +47,89 @@ def find_first_key(obj: Any, key: str, max_depth: int = 6) -> Optional[Any]:
 def extract_instruction(container: Any, events: List[Event]) -> str:
     v = find_first_key(container, "instruction") or find_first_key(container, "task")
     return str(v).strip() if v is not None else ""
+
+def _parse_markdown_trajectory(raw: str, default_tid: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse a markdown conversation trajectory into the standard events format.
+
+    Expected format:
+      # User Properties
+      - **key**: value
+      ...
+
+      # Conversation
+      ## ***user*** #0
+      <content>
+      <hr style="border:5px solid">
+      ## ***assistant*** #1
+      <content>
+      ...
+
+    Returns None if the content doesn't look like a markdown conversation.
+    Returns data with a special ``_markdown_ir`` flag so that ``run_ir`` can
+    skip the domain converter and use the pre-built IR directly.
+    """
+    # Quick check: must contain the markdown turn pattern
+    TURN_RE = re.compile(
+        r"^##\s+\*{3}(\w+)\*{3}\s+#(\d+)\s*$", re.MULTILINE
+    )
+    turns = list(TURN_RE.finditer(raw))
+    if not turns:
+        return None
+
+    # Extract metadata from "# User Properties" section
+    metadata: Dict[str, str] = {}
+    prop_re = re.compile(r"^-\s+\*\*(\w[\w_]*)\*\*:\s*(.+)$", re.MULTILINE)
+    for m in prop_re.finditer(raw):
+        metadata[m.group(1)] = m.group(2).strip()
+
+    tid = metadata.get("scenario_name", default_tid)
+    instruction = metadata.get("first_turn_prompt", "")
+
+    # Parse conversation turns
+    events: List[Dict[str, Any]] = []
+    for idx, match in enumerate(turns):
+        role = match.group(1).lower()  # "user" or "assistant"
+        # Content runs from end of this header to start of next turn (or end of file)
+        start = match.end()
+        end = turns[idx + 1].start() if idx + 1 < len(turns) else len(raw)
+        content = raw[start:end].strip()
+        # Strip trailing <hr> separators
+        content = re.sub(r'<hr\s+style="[^"]*">\s*$', "", content).strip()
+        # Skip empty sentinel turns like "conversation_end_marker"
+        if content == "conversation_end_marker":
+            continue
+        events.append({"role": role, "content": content})
+
+    return [{"trajectory_id": tid, "instruction": instruction, "events": events,
+             "metadata": metadata, "_markdown_ir": True}]
+
+
+def markdown_ir(trajectories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Convert markdown-parsed trajectories (role/content events) into canonical IR.
+    Each conversation turn becomes its own step (1-based index).
+    """
+    out: List[Dict[str, Any]] = []
+    for t in trajectories:
+        trajectory_id = str(t.get("trajectory_id") or "unknown")
+        instruction = str(t.get("instruction") or "")
+        messages: List[Dict[str, Any]] = t.get("events", []) or []
+
+        steps: List[Dict[str, Any]] = []
+        for i, m in enumerate(messages):
+            role = str(m.get("role") or "unknown")
+            content = str(m.get("content") or "")
+            steps.append({
+                "index": i + 1,
+                "substeps": [{"sub_index": 1, "role": role, "content": content}],
+            })
+
+        ir = {"trajectory_id": trajectory_id, "instruction": instruction, "steps": steps}
+        validate_ir(ir)
+        out.append(ir)
+    return out
+
 
 def load_trajectories(path: str) -> List[Trajectory]:
     """
@@ -175,6 +258,11 @@ def load_trajectories(path: str) -> List[Trajectory]:
     except json.JSONDecodeError:
         pass
 
+    # --- Markdown conversation fallback ---
+    md_result = _parse_markdown_trajectory(raw, default_tid)
+    if md_result is not None:
+        return md_result
+
     # --- Streamed / JSONL / glued-object fallback ---
     dec = json.JSONDecoder()
     i, n = 0, len(raw)
@@ -264,6 +352,36 @@ def validate_ir(ir: Event) -> None:
                 raise ValueError("Substep.sub_index must start at 1")
             if not isinstance(sub["role"], str) or not isinstance(sub["content"], str):
                 raise ValueError("Substep.role/content must be str")
+
+
+def is_ir(data: list) -> bool:
+    """Return True if *data* already looks like a list of valid IR dicts."""
+    if not data:
+        return False
+    try:
+        validate_ir(data[0])
+        return True
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def ensure_ir(path: str, domain: str) -> list:
+    """Load *path* and return IR.  Converts on the fly if the file is raw."""
+    with open(path, "r", encoding="utf-8-sig") as f:
+        raw_json = json.load(f)
+    data = raw_json if isinstance(raw_json, list) else [raw_json]
+
+    if is_ir(data):
+        return data
+
+    # Not IR yet – run the domain converter
+    from invariants.domain_registry import get_domain_config
+    raw = load_trajectories(path)
+    converted = get_domain_config(domain).ir_converter(raw)
+    if not isinstance(converted, list):
+        converted = [converted]
+    return converted
+
 
 def tau_bench_ir(trajectories: List[Trajectory]) -> List[Event]:
     """
@@ -558,11 +676,68 @@ def llm_ir(
     else:
         raise ValueError(f"Unknown endpoint: {endpoint!r}. Expected 'azure' or 'trapi'.")
 
+    # Max chars for the raw trajectory JSON sent to the LLM.
+    # ~200K tokens ≈ 800K chars, leaving room for system prompt + response.
+    MAX_TRAJ_CHARS = 800_000
+
     results: List[Dict[str, Any]] = []
 
     for t_idx, traj in enumerate(trajectories):
         # Build the user message with the raw trajectory
         raw_json = json.dumps(traj, indent=2, ensure_ascii=False)
+
+        # Truncate oversized trajectories to fit within the LLM context window
+        if len(raw_json) > MAX_TRAJ_CHARS:
+            if verbose:
+                print(
+                    f"[LLM-IR]   trajectory {t_idx} too large "
+                    f"({len(raw_json)} chars) — truncating to {MAX_TRAJ_CHARS} chars",
+                    flush=True,
+                )
+            # Try to truncate at the event/list-item level for cleaner output
+            if isinstance(traj, list):
+                # Binary search for the largest prefix that fits
+                lo, hi = 1, len(traj)
+                while lo < hi:
+                    mid = (lo + hi + 1) // 2
+                    if len(json.dumps(traj[:mid], indent=2, ensure_ascii=False)) <= MAX_TRAJ_CHARS:
+                        lo = mid
+                    else:
+                        hi = mid - 1
+                truncated = traj[:lo]
+                raw_json = json.dumps(truncated, indent=2, ensure_ascii=False)
+                if verbose:
+                    print(
+                        f"[LLM-IR]   kept {lo}/{len(traj)} events ({len(raw_json)} chars)",
+                        flush=True,
+                    )
+            elif isinstance(traj, dict) and any(
+                isinstance(traj.get(k), list) for k in PREFERRED_KEYS
+            ):
+                # Truncate the main event list inside the dict
+                for k in PREFERRED_KEYS:
+                    if isinstance(traj.get(k), list) and len(traj[k]) > 1:
+                        events = traj[k]
+                        lo, hi = 1, len(events)
+                        while lo < hi:
+                            mid = (lo + hi + 1) // 2
+                            trial = {**traj, k: events[:mid]}
+                            if len(json.dumps(trial, indent=2, ensure_ascii=False)) <= MAX_TRAJ_CHARS:
+                                lo = mid
+                            else:
+                                hi = mid - 1
+                        traj = {**traj, k: events[:lo]}
+                        raw_json = json.dumps(traj, indent=2, ensure_ascii=False)
+                        if verbose:
+                            print(
+                                f"[LLM-IR]   kept {lo}/{len(events)} items in '{k}' ({len(raw_json)} chars)",
+                                flush=True,
+                            )
+                        break
+            else:
+                # Last resort: hard character truncation
+                raw_json = raw_json[:MAX_TRAJ_CHARS]
+
         user_msg = (
             f"Convert the following raw trajectory (index {t_idx}) into the "
             f"standard IR format described in the system prompt.\n\n"

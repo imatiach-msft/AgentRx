@@ -105,19 +105,28 @@ def load_and_analyze_json(json_file_path):
     predicted_freq = {i: 0 for i in range(1, 11)}
     gt_freq = {i: 0 for i in range(1, 11)}
     
+    has_gt = False
     # Count frequencies
     for result in detailed_results:
-        # Extract predicted failure case (from most_common_failure)
-        predicted_case_str = result['most_common_failure']
+        # Extract predicted failure case: prefer most_common_failure, fall back to
+        # the first entry in the failures list when no ground truth was provided.
+        if 'most_common_failure' in result:
+            predicted_case_str = result['most_common_failure']
+        elif result.get('failures'):
+            predicted_case_str = str(result['failures'][0].get('failure_case', 0))
+        else:
+            continue
         predicted_case_num = extract_failure_case_number(predicted_case_str)
         predicted_freq[predicted_case_num] += 1
         
-        # Extract ground truth failure case
-        gt_case_str = result['gt_failure_case']
-        gt_case_num = extract_failure_case_number(gt_case_str)
-        gt_freq[gt_case_num] += 1
+        # Extract ground truth failure case (only when GT is available)
+        if 'gt_failure_case' in result:
+            has_gt = True
+            gt_case_str = result['gt_failure_case']
+            gt_case_num = extract_failure_case_number(gt_case_str)
+            gt_freq[gt_case_num] += 1
     
-    return predicted_freq, gt_freq
+    return predicted_freq, gt_freq if has_gt else None
 
 def plot_predicted_frequency(predicted_freq, output_file='predicted_failure_frequency.png'):
     """
