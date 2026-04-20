@@ -23,6 +23,9 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env            # Fill in your Azure or TRAPI endpoint details
 
+# Local dev: skip ManagedIdentity IMDS probe
+export AZURE_TOKEN_CREDENTIALS=dev  # or add to your .env file
+
 # Run the full pipeline end-to-end
 python run.py trajectory.json
 
