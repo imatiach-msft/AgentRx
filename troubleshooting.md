@@ -17,24 +17,19 @@ Attempted credentials:
 
 This is a known issue across all Azure SDKs: [azure-sdk-for-python #35452](https://github.com/Azure/azure-sdk-for-python/issues/35452)
 
-**Workarounds:**
+**Fix:** Set the `AZURE_TOKEN_CREDENTIALS` environment variable to `dev` to exclude deployed-service credentials (e.g. `ManagedIdentityCredential`, `WorkloadIdentityCredential`) from the chain, so `DefaultAzureCredential` skips straight to developer-tool credentials like `AzureCliCredential`:
 
-1. **Retry** — subsequent runs typically succeed because the token gets cached.
+```bash
+# PowerShell
+$env:AZURE_TOKEN_CREDENTIALS = "dev"
 
-2. **Warm the cache first** — run this before the pipeline:
-   ```bash
-   .venv/Scripts/python -c "from azure.identity import AzureCliCredential; AzureCliCredential().get_token('https://cognitiveservices.azure.com/.default'); print('Token cached')"
-   ```
+# Bash / Linux / macOS
+export AZURE_TOKEN_CREDENTIALS=dev
+```
 
-3. **Exclude ManagedIdentityCredential** — in `src/llm_clients/azure.py`, change:
-   ```python
-   DefaultAzureCredential(managed_identity_client_id=g.CLIENT_ID)
-   ```
-   to:
-   ```python
-   DefaultAzureCredential(exclude_managed_identity_credential=True)
-   ```
-   This skips the IMDS probe entirely. Only use this for local dev — do not commit if running in Azure (where managed identity is needed).
+Or add `AZURE_TOKEN_CREDENTIALS=dev` to your `.env` file.
+
+> Requires `azure-identity >= 1.23.0`. See [Exclude a credential type category](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains?tabs=dac#exclude-a-credential-type-category) for details.
 
 ### Prerequisite: `az login`
 
