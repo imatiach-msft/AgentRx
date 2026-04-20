@@ -15,7 +15,7 @@ Attempted credentials:
 
 **Cause:** `DefaultAzureCredential` tries `ManagedIdentityCredential` early in its chain. On a local dev machine, this attempts to contact the IMDS endpoint which doesn't exist locally, so it blocks until the network timeout (~5-10s). This can exhaust the overall credential chain timeout or cause cascading failures before `AzureCliCredential` gets a chance to run.
 
-This is a known issue across all Azure SDKs: [azure-sdk-for-python #35452](https://github.com/Azure/azure-sdk-for-python/issues/35452)
+This is expected behavior — `DefaultAzureCredential` probes the IMDS endpoint to detect the hosting environment, and the timeout is unavoidable on local machines unless the credential chain is configured to skip it.
 
 **Fix:** Set the `AZURE_TOKEN_CREDENTIALS` environment variable to `dev` to exclude deployed-service credentials (e.g. `ManagedIdentityCredential`, `WorkloadIdentityCredential`) from the chain, so `DefaultAzureCredential` skips straight to developer-tool credentials like `AzureCliCredential`:
 
