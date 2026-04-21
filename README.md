@@ -23,6 +23,9 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env            # Fill in your Azure or TRAPI endpoint details
 
+# Local dev: skip ManagedIdentity IMDS probe
+export AZURE_TOKEN_CREDENTIALS=dev  # or add to your .env file
+
 # Run the full pipeline end-to-end
 python run.py trajectory.json
 
@@ -190,12 +193,21 @@ See [requirements.txt](requirements.txt) for the full list of dependencies.
 
 ### `DefaultAzureCredential` timeout on local machines
 
-The Azure SDK's `DefaultAzureCredential` tries `ManagedIdentityCredential` before `AzureCliCredential`. On a local dev machine this probes the IMDS endpoint which doesn't exist locally, causing a ~5-10s timeout before falling back. This is a [known Azure SDK issue](https://github.com/Azure/azure-sdk-for-python/issues/35452).
+The Azure SDK's `DefaultAzureCredential` tries `ManagedIdentityCredential` before `AzureCliCredential`. On a local dev machine this probes the IMDS endpoint which doesn't exist locally, causing a ~5-10s timeout before falling back. This is expected behavior — the probe is how `DefaultAzureCredential` detects the hosting environment.
 
-**Workaround:** retry (the token gets cached), or warm the cache first:
+**Fix:** Set the `AZURE_TOKEN_CREDENTIALS` environment variable to `dev` to exclude deployed-service credentials (e.g. `ManagedIdentityCredential`, `WorkloadIdentityCredential`) from the chain, so `DefaultAzureCredential` skips straight to developer-tool credentials like `AzureCliCredential`:
+
 ```bash
-.venv/Scripts/python -c "from azure.identity import AzureCliCredential; AzureCliCredential().get_token('https://cognitiveservices.azure.com/.default'); print('Token cached')"
+# PowerShell
+$env:AZURE_TOKEN_CREDENTIALS = "dev"
+
+# Bash / Linux / macOS
+export AZURE_TOKEN_CREDENTIALS=dev
 ```
+
+Or add `AZURE_TOKEN_CREDENTIALS=dev` to your `.env` file.
+
+> Requires `azure-identity >= 1.23.0`. See [Exclude a credential type category](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains?tabs=dac#exclude-a-credential-type-category) for details.
 
 ---
 

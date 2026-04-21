@@ -15,26 +15,21 @@ Attempted credentials:
 
 **Cause:** `DefaultAzureCredential` tries `ManagedIdentityCredential` early in its chain. On a local dev machine, this attempts to contact the IMDS endpoint which doesn't exist locally, so it blocks until the network timeout (~5-10s). This can exhaust the overall credential chain timeout or cause cascading failures before `AzureCliCredential` gets a chance to run.
 
-This is a known issue across all Azure SDKs: [azure-sdk-for-python #35452](https://github.com/Azure/azure-sdk-for-python/issues/35452)
+This is expected behavior — `DefaultAzureCredential` probes the IMDS endpoint to detect the hosting environment, and the timeout is unavoidable on local machines unless the credential chain is configured to skip it.
 
-**Workarounds:**
+**Fix:** Set the `AZURE_TOKEN_CREDENTIALS` environment variable to `dev` to exclude deployed-service credentials (e.g. `ManagedIdentityCredential`, `WorkloadIdentityCredential`) from the chain, so `DefaultAzureCredential` skips straight to developer-tool credentials like `AzureCliCredential`:
 
-1. **Retry** — subsequent runs typically succeed because the token gets cached.
+```bash
+# PowerShell
+$env:AZURE_TOKEN_CREDENTIALS = "dev"
 
-2. **Warm the cache first** — run this before the pipeline:
-   ```bash
-   .venv/Scripts/python -c "from azure.identity import AzureCliCredential; AzureCliCredential().get_token('https://cognitiveservices.azure.com/.default'); print('Token cached')"
-   ```
+# Bash / Linux / macOS
+export AZURE_TOKEN_CREDENTIALS=dev
+```
 
-3. **Exclude ManagedIdentityCredential** — in `src/llm_clients/azure.py`, change:
-   ```python
-   DefaultAzureCredential(managed_identity_client_id=g.CLIENT_ID)
-   ```
-   to:
-   ```python
-   DefaultAzureCredential(exclude_managed_identity_credential=True)
-   ```
-   This skips the IMDS probe entirely. Only use this for local dev — do not commit if running in Azure (where managed identity is needed).
+Or add `AZURE_TOKEN_CREDENTIALS=dev` to your `.env` file.
+
+> Requires `azure-identity >= 1.23.0`. See [Exclude a credential type category](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains?tabs=dac#exclude-a-credential-type-category) for details.
 
 ### Prerequisite: `az login`
 
