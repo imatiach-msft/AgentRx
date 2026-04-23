@@ -475,7 +475,7 @@ DOMAIN_REGISTRY: Dict[str, DomainConfig] = {
         tools_list=MAGENTIC_ONE_TOOLS_LIST,
         tools_structure=MAGENTIC_ONE_TOOLS_STRUCTURE,
         examples_block="",
-        default_policy_path=None,
+        default_policy_path=os.path.join("data", "policies", "magentic_policy.txt"),
     ),
 }
 
