@@ -136,7 +136,14 @@ def _flatten_messages(messages: List[Dict[str, str]]) -> str:
 
 
 COPILOT_TIMEOUT = int(os.getenv("AGENT_VERIFY_COPILOT_TIMEOUT", "600"))
-COPILOT_MODEL = os.getenv("COPILOT_MODEL", "claude-opus-4.6")  # default: Opus 4.6; override via env var
+# Model selection for Copilot CLI. Prefers AGENT_VERIFY_COPILOT_MODEL (standard naming),
+# falls back to COPILOT_MODEL for backward compat. See `copilot --help` for supported
+# models (e.g. claude-opus-4.6, claude-sonnet-4.5, gpt-5, gpt-5-mini).
+COPILOT_MODEL = (
+    os.getenv("AGENT_VERIFY_COPILOT_MODEL")
+    or os.getenv("COPILOT_MODEL")
+    or "claude-opus-4.6"
+)
 
 
 # Max characters safe for the -p flag on Windows (WinError 206 above this).
