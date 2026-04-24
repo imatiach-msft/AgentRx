@@ -1865,7 +1865,11 @@ class DynamicInvariantGenerator:
         self.tools_structure = tools_structure
         self.include_nl_check = include_nl_check
 
-        if endpoint == "azure":
+        if endpoint == "copilot":
+            from llm_clients.copilot_cli import copilot_mk_client
+            self.client = copilot_mk_client()
+            self.model_name = model_name or "copilot-cli"
+        elif endpoint == "azure":
             self.client = LLMAgentAzure.azure_mk_client()
             self.model_name = model_name or g.DEPLOYMENT
         else:
@@ -1991,8 +1995,11 @@ class DynamicInvariantGenerator:
                     obj = json.loads(raw_text)
                     if isinstance(obj, dict):
                         parsed_obj = obj
+                    elif isinstance(obj, list):
+                        # Model returned a bare array — wrap it
+                        parsed_obj = {"invariant": obj}
                     else:
-                        parse_error = "Model returned non-object JSON"
+                        parse_error = f"Model returned {type(obj).__name__}, expected dict or list"
                 except Exception as e:
                     parse_error = str(e)
 
@@ -2032,7 +2039,9 @@ class DynamicInvariantGenerator:
                 }
                 # Accumulate invariant objects for future steps ("previous_assertions")
                 if isinstance(parsed_obj, dict):
-                    inv_list = parsed_obj.get("invariant") or []
+                    inv_list = (parsed_obj.get("invariant")
+                                or parsed_obj.get("invariants")
+                                or parsed_obj.get("dynamic_invariants") or [])
                     if isinstance(inv_list, list):
                         dynamic_invariants.extend([x for x in inv_list if isinstance(x, dict)])
                 per_step_outputs.append(record)
@@ -2144,7 +2153,11 @@ class OneShotDynamicInvariantGenerator:
         self.tools_structure = tools_structure
         self.include_nl_check = include_nl_check
 
-        if endpoint == "azure":
+        if endpoint == "copilot":
+            from llm_clients.copilot_cli import copilot_mk_client
+            self.client = copilot_mk_client()
+            self.model_name = model_name or "copilot-cli"
+        elif endpoint == "azure":
             self.client = LLMAgentAzure.azure_mk_client()
             self.model_name = model_name or g.DEPLOYMENT
         else:
@@ -2240,9 +2253,13 @@ class OneShotDynamicInvariantGenerator:
             parse_error: Optional[str] = None
             try:
                 obj = json.loads(raw_text)
-                parsed_obj = obj if isinstance(obj, dict) else None
-                if parsed_obj is None:
-                    parse_error = "Model returned non-object JSON"
+                if isinstance(obj, dict):
+                    parsed_obj = obj
+                elif isinstance(obj, list):
+                    # Model returned a bare array — wrap it
+                    parsed_obj = {"invariant": obj}
+                else:
+                    parse_error = f"Model returned {type(obj).__name__}, expected dict or list"
             except Exception as e:
                 parse_error = str(e)
 
@@ -2263,7 +2280,9 @@ class OneShotDynamicInvariantGenerator:
 
             dynamic_invariants: List[dict] = []
             if isinstance(parsed_obj, dict):
-                inv_list = parsed_obj.get("invariant") or []
+                inv_list = (parsed_obj.get("invariant")
+                            or parsed_obj.get("invariants")
+                            or parsed_obj.get("dynamic_invariants") or [])
                 if isinstance(inv_list, list):
                     dynamic_invariants = [x for x in inv_list if isinstance(x, dict)]
 

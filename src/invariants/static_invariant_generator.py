@@ -765,7 +765,12 @@ class StaticInvariantGenerator:
             
         ensure_dir(os.path.dirname(self.out_path))
 
-        if endpoint == "azure":
+        if endpoint == "copilot":
+            from llm_clients.copilot_cli import copilot_mk_client
+            self.client = copilot_mk_client()
+            self.model_name = model_name or "copilot-cli"
+            self._endpoint_url = "copilot-cli"
+        elif endpoint == "azure":
             self.client = LLMAgentAzure.azure_mk_client()
             self.model_name = model_name or g.DEPLOYMENT
             self._endpoint_url = g.ENDPOINT
@@ -854,8 +859,12 @@ class StaticInvariantGenerator:
         raw = (resp.choices[0].message.content or "").strip()
         try:
             obj = json.loads(raw)
+            # Copilot CLI may return a bare array instead of {"invariants": [...]}.
+            # Wrap it so downstream code always sees a dict.
+            if isinstance(obj, list):
+                obj = {"invariants": obj}
             if not isinstance(obj, dict):
-                raise ValueError("model returned non-object JSON")
+                raise ValueError(f"model returned {type(obj).__name__}, expected dict or list")
         except Exception as e:
             raise RuntimeError(
                 f"Static invariants JSON parse failed: {e}\n")

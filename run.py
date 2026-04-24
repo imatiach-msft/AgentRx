@@ -96,7 +96,10 @@ def banner(msg: str):
 def validate_endpoint_config(endpoint: str):
     """Validate that required environment variables are set for the chosen endpoint."""
     missing = []
-    if endpoint == "trapi":
+    if endpoint == "copilot":
+        # Copilot CLI needs no env vars — just the binary on PATH
+        pass
+    elif endpoint == "trapi":
         if not g.TRAPI_INSTANCE:
             missing.append("AGENT_VERIFY_TRAPI_INSTANCE")
         if not g.TRAPI_DEPLOYMENT_NAME:
@@ -107,7 +110,7 @@ def validate_endpoint_config(endpoint: str):
         if not g.ENDPOINT:
             missing.append("AGENT_VERIFY_ENDPOINT")
     else:
-        print(f"\nError: Unknown endpoint '{endpoint}'. Must be 'azure' or 'trapi'.")
+        print(f"\nError: Unknown endpoint '{endpoint}'. Must be 'copilot', 'azure', or 'trapi'.")
         sys.exit(1)
 
     if missing:
@@ -233,12 +236,14 @@ def run_static(input_path: str, run_dir: str, domain: str, endpoint: str,
 # ---------- Stage: Dynamic Invariants ----------
 
 def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
-                static_invariants_path: str, state: dict) -> str:
+                static_invariants_path: str, state: dict,
+                dynamic_mode: str = "stepbystep") -> str:
     """Generate dynamic invariants. Returns path to output directory."""
-    from invariants.dynamic_invariant_generator import DynamicInvariantGenerator
+    from invariants.dynamic_invariant_generator import DynamicInvariantGenerator, OneShotDynamicInvariantGenerator
     from invariants.domain_registry import get_domain_config
 
-    banner("Stage 3/6: Dynamic Invariant Generation")
+    mode_label = "one-shot" if dynamic_mode == "oneshot" else "step-by-step"
+    banner(f"Stage 3/6: Dynamic Invariant Generation ({mode_label})")
 
     out_dir = os.path.join(run_dir, "dynamic_invariants")
     ensure_dir(out_dir)
@@ -254,7 +259,8 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
         tools_list = cfg.tools_list
         tools_structure = cfg.tools_structure
 
-    gen = DynamicInvariantGenerator(
+    GeneratorClass = OneShotDynamicInvariantGenerator if dynamic_mode == "oneshot" else DynamicInvariantGenerator
+    gen = GeneratorClass(
         out_dir=out_dir,
         static_invariants_path=static_invariants_path,
         domain=domain,
@@ -400,14 +406,17 @@ def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
     print(f"  [DEBUG][run_judge] api_version:           {api_version}")
     print(f"  [DEBUG][run_judge] model_name:            {model_name}")
 
-    # Run a single iteration
+    # Run a single iteration.
+    # Use the IR file (already normalized) so the judge doesn't re-normalize
+    # and lose trajectories.
+    ir_file = os.path.join(run_dir, "trajectory_ir.json")
     judge_module.run_single_iteration(
         run_number=1,
         base_output_dir=judge_out_dir,
         ground_truth_failures=gt_failures,
         api_version=api_version,
         model_name=model_name,
-        log_file=input_path,
+        log_file=ir_file if os.path.exists(ir_file) else input_path,
     )
 
     print(f"  Output: {judge_out_dir}")
@@ -503,14 +512,16 @@ Examples:
     parser.add_argument("--domain", default=None,
                         choices=["tau", "flash", "magentic"],
                         help="Domain (auto-detected if not specified)")
-    parser.add_argument("--endpoint", default=g.DEFAULT_ENDPOINT, choices=["azure", "trapi"],
-                        help="LLM endpoint (default: azure). TRAPI is Microsoft Research internal.")
+    parser.add_argument("--endpoint", default=g.DEFAULT_ENDPOINT, choices=["copilot", "azure", "trapi"],
+                        help="LLM endpoint (default: copilot). Options: copilot (GitHub CLI), azure, trapi.")
     parser.add_argument("--stage", default=None, choices=STAGES,
                         help="Run ONLY this stage")
     parser.add_argument("--from-stage", default=None, choices=STAGES,
                         help="Resume from this stage (skips earlier stages)")
     parser.add_argument("--skip-dynamic", action="store_true",
                         help="Skip dynamic invariant generation (faster)")
+    parser.add_argument("--dynamic-mode", default="stepbystep", choices=["stepbystep", "oneshot"],
+                        help="Dynamic invariant mode: stepbystep (per-step, slower) or oneshot (single LLM call per trajectory, faster)")
     parser.add_argument("--skip-judge", action="store_true",
                         help="Skip judge and report stages")
     parser.add_argument("--ground-truth", default=None,
@@ -653,7 +664,8 @@ def run_pipeline(input_path: str, args):
 
         # --- Dynamic Invariants ---
         if "dynamic" in stages_to_run:
-            dynamic_inv_dir = run_dynamic(input_path, run_dir, domain, args.endpoint, static_inv_path, state)
+            dynamic_inv_dir = run_dynamic(input_path, run_dir, domain, args.endpoint, static_inv_path, state,
+                                          dynamic_mode=args.dynamic_mode)
             state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"dynamic"})
             save_state(run_dir, state)
 

@@ -195,7 +195,11 @@ class AllVerifier:
                     dbg(f"      event_trigger={jdump(trig, maxlen=800)}")
                 dbg(f"      check_type_field={inv.get('check_type')!r} check_field={inv.get('check')!r} inferred={self._infer_check_type(inv)!r}")
 
-        if self.client == "azure":
+        if self.client == "copilot":
+            from llm_clients.copilot_cli import copilot_mk_client
+            self.llm_client = copilot_mk_client()
+            self.model_name = "copilot-cli"
+        elif self.client == "azure":
             self.llm_client = LLMAgentAzure.azure_mk_client()
             self.model_name = g.DEPLOYMENT
         else:
@@ -271,6 +275,10 @@ class AllVerifier:
                 dbg(f"Loaded {dynamic_count} dynamic invariants from per_step_outputs")
             return out
 
+        # Also check one-shot format: dynamic invariants stored directly
+        if "dynamic_invariants" in data:
+            add_payload(data.get("dynamic_invariants"))
+
         if "invariants" in data:
             add_payload(data.get("invariants"))
             return out
@@ -333,27 +341,44 @@ class AllVerifier:
         return f"step_pos={step_pos} step.index={idx!r} substeps={len(subs) if isinstance(subs, list) else 'NONLIST'}"
 
     def _step_matches_trigger(self, trig_step: Any, step_pos: int, step_obj: Dict[str, Any]) -> bool:
-        """ # TODO
+        """
         We DO NOT rewrite trigger.step_index. But to avoid obvious off-by-one pains,
         we accept a match if:
           - trigger_step == step_pos
           - OR trigger_step == step_pos + 1
           - OR trigger_step == step_obj.get("index") (if present and int-ish)
+          - OR trigger_step is a range like "20-21" and step_pos/index falls in it
         """
         if trig_step in (None, "", "*"):
             return True
 
+        step_index_field = safe_int(step_obj.get("index"))
+
+        # Try simple integer match first
         t = safe_int(trig_step)
-        if t is None:
+        if t is not None:
+            if t == step_pos:
+                return True
+            if t == step_pos + 1:
+                return True
+            if step_index_field is not None and t == step_index_field:
+                return True
             return False
 
-        step_index_field = safe_int(step_obj.get("index"))
-        if t == step_pos:
-            return True
-        if t == step_pos + 1:
-            return True
-        if step_index_field is not None and t == step_index_field:
-            return True
+        # Handle range triggers like "20-21", "15-20"
+        trig_str = str(trig_step).strip()
+        if "-" in trig_str:
+            parts = trig_str.split("-", 1)
+            lo = safe_int(parts[0].strip())
+            hi = safe_int(parts[1].strip())
+            if lo is not None and hi is not None:
+                # Check both step_pos (0-based) and step.index (1-based)
+                if lo <= step_pos <= hi:
+                    return True
+                if lo <= step_pos + 1 <= hi:
+                    return True
+                if step_index_field is not None and lo <= step_index_field <= hi:
+                    return True
 
         return False
 
@@ -569,27 +594,19 @@ class AllVerifier:
             m.POLICY_TEXT = self.policy_text
             sys.modules["policy_text"] = m
 
-            # Strip redundant import lines for modules already provided in the
-            # sandbox — the restricted builtins intentionally omit __import__ so
-            # bare `import x` would crash with "ImportError: __import__ not found".
-            _provided_modules = {"json", "re", "math", "collections"}
-            sanitized_lines = []
-            for line in code.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("import "):
-                    mod = stripped.split()[1].split(".")[0].rstrip(",")
-                    if mod in _provided_modules:
-                        continue
-                elif stripped.startswith("from ") and " import " in stripped:
-                    mod = stripped.split()[1].split(".")[0]
-                    if mod in _provided_modules:
-                        continue
-                sanitized_lines.append(line)
-            code = "\n".join(sanitized_lines)
+            # Allow __import__ so generated checks can do 'import json', 'import re', etc.
+            # We restrict to a safe allowlist of modules.
+            _allowed_modules = {"json", "re", "math", "datetime", "collections", "itertools", "functools", "string"}
+            _real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+            def _safe_import(name, *args, **kwargs):
+                if name.split(".")[0] not in _allowed_modules:
+                    raise ImportError(f"Import of '{name}' is not allowed in invariant checks")
+                return _real_import(name, *args, **kwargs)
 
             import collections as _collections
             import math as _math
             _safe_builtins = {
+                "__import__": _safe_import,
                 "str": str, "int": int, "float": float, "bool": bool,
                 "dict": dict, "list": list, "tuple": tuple, "set": set,
                 "len": len, "range": range, "enumerate": enumerate,
