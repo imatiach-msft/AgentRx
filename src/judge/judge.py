@@ -44,7 +44,7 @@ RESULTS_DIR = "output_results"
 
 # Global Configs (will be updated by main)
 RUN_WITH_CONTEXT = False
-ENDPOINT_USED = None # will be set in main
+ENDPOINT_USED = None  # will be set in main — "copilot", "azure", or "trapi"
 USE_GROUND_TRUTH = True
 PROMPT_MODE = "combined"     # "baseline", "checklist", "examples", "combined"
 EXECUTION_MODE = "violations-after" # "violations-after", "stepbystep", "violations-before"
@@ -818,7 +818,13 @@ def _normalize_by_domain(domain: str, raw):
 # --- Judge Class (Merged Logic) ---
 
 def get_llm_judge_class():
-    base_class = LLMAgentAzure if ENDPOINT_USED == "azure" else LLMAgentTrapi
+    if ENDPOINT_USED == "copilot":
+        from llm_clients.copilot_cli import LLMAgent as LLMAgentCopilot
+        base_class = LLMAgentCopilot
+    elif ENDPOINT_USED == "azure":
+        base_class = LLMAgentAzure
+    else:
+        base_class = LLMAgentTrapi
     
     class LLMJudge(base_class):
         def _parse_json_response(self, response, context_name="LLM", max_retries=2):
@@ -1069,10 +1075,14 @@ def judge_trajectories(log_file, num_runs=1, ground_truth_task_ids=None):
     # Assuming params from global g or env
     # Note: Azure globals only has API_VERSION, MODEL_NAME, DEPLOYMENT (no MODEL_VERSION)
     # TRAPI has TRAPI_API_VERSION, TRAPI_MODEL_NAME, TRAPI_MODEL_VERSION, TRAPI_DEPLOYMENT_NAME
-    api_version = g.API_VERSION if ENDPOINT_USED == "azure" else g.TRAPI_API_VERSION
-    model_name = g.MODEL_NAME if ENDPOINT_USED == "azure" else g.TRAPI_MODEL_NAME
-    model_version = g.MODEL_NAME if ENDPOINT_USED == "azure" else g.TRAPI_MODEL_VERSION
-    deployment_name = g.DEPLOYMENT if ENDPOINT_USED == "azure" else g.TRAPI_DEPLOYMENT_NAME
+    if ENDPOINT_USED == "copilot":
+        api_version, model_name, model_version, deployment_name = "", "copilot-cli", "", "copilot-cli"
+    elif ENDPOINT_USED == "azure":
+        api_version, model_name = g.API_VERSION, g.MODEL_NAME
+        model_version, deployment_name = g.MODEL_NAME, g.DEPLOYMENT
+    else:
+        api_version, model_name = g.TRAPI_API_VERSION, g.TRAPI_MODEL_NAME
+        model_version, deployment_name = g.TRAPI_MODEL_VERSION, g.TRAPI_DEPLOYMENT_NAME
 
     judge = LLMJudge(api_version=api_version, model_name=model_name, model_version=model_version, deployment_name=deployment_name)
     
@@ -1806,8 +1816,8 @@ def main():
                         help='Path to trajectory log file or directory')
     parser.add_argument('--ground_truth_file', default='ground_truth_tau_retail.json',
                         help='Path to ground truth JSON file for accuracy evaluation')
-    parser.add_argument('--endpoint', default=g.DEFAULT_ENDPOINT, choices=['azure', 'trapi'],
-                        help='LLM API endpoint to use')
+    parser.add_argument('--endpoint', default=g.DEFAULT_ENDPOINT, choices=['copilot', 'azure', 'trapi'],
+                        help='LLM API endpoint to use (default: copilot)')
     parser.add_argument('--with-context', action='store_true',
                         help='Include invariant violation context in prompts')
     
@@ -1836,7 +1846,10 @@ def main():
     
     # Set endpoint globally
     ENDPOINT_USED = args.endpoint
-    if ENDPOINT_USED == "azure":
+    if ENDPOINT_USED == "copilot":
+        api_version = ""
+        model_name = "copilot-cli"
+    elif ENDPOINT_USED == "azure":
         api_version = g.API_VERSION
         model_name = g.MODEL_NAME
     else:

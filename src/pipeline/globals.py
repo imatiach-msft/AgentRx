@@ -58,9 +58,9 @@ MAGENTIC_TASK_IDS = [
     "f88066d274e265edd6cd9d61cd80a41accb3a14baf2297652fdd05cdf716d455",
 ]
 
-DEFAULT_ENDPOINT = os.environ.get("AGENT_VERIFY_ENDPOINT_TYPE", "azure")  # "azure" or "trapi"
-if DEFAULT_ENDPOINT not in ("azure", "trapi"):
-    raise ValueError(f"AGENT_VERIFY_ENDPOINT_TYPE must be 'azure' or 'trapi', got: {DEFAULT_ENDPOINT!r}")
+DEFAULT_ENDPOINT = os.environ.get("AGENT_VERIFY_ENDPOINT_TYPE", "copilot")  # "copilot", "azure", or "trapi"
+if DEFAULT_ENDPOINT not in ("copilot", "azure", "trapi"):
+    raise ValueError(f"AGENT_VERIFY_ENDPOINT_TYPE must be 'copilot', 'azure', or 'trapi', got: {DEFAULT_ENDPOINT!r}")
 
 TRAPI_INSTANCE = os.environ.get("AGENT_VERIFY_TRAPI_INSTANCE", "")  # See https://aka.ms/trapi/models for the instance name
 TRAPI_ENDPOINT_PREFIX = os.environ.get("AGENT_VERIFY_TRAPI_ENDPOINT_PREFIX", "https://trapi.research.microsoft.com/")
@@ -149,6 +149,7 @@ METRICS_OUTPUT_DIR_PATH = 'metrics_output'
 JUDGE_CONTEXT_DIR_PATH = 'judge_context'
 DEDUPLICATED_VIOLATIONS_DIR_PATH = 'deduplicated_violations'
 
+COPILOT_ENDPOINT = "copilot"
 AZURE_ENDPOINT = "azure"
 TRAPI_ENDPOINT = "trapi"
 

@@ -665,7 +665,11 @@ def llm_ir(
     """
     import pipeline.globals as g
 
-    if endpoint == "azure":
+    if endpoint == "copilot":
+        from llm_clients.copilot_cli import copilot_mk_client
+        client = copilot_mk_client()
+        model = "copilot-cli"
+    elif endpoint == "azure":
         from llm_clients.azure import LLMAgent as LLMAgentAzure
         client = LLMAgentAzure.azure_mk_client()
         model = g.DEPLOYMENT
@@ -674,7 +678,7 @@ def llm_ir(
         client = LLMAgentTrapi.trapi_mk_client()
         model = g.TRAPI_DEPLOYMENT_NAME
     else:
-        raise ValueError(f"Unknown endpoint: {endpoint!r}. Expected 'azure' or 'trapi'.")
+        raise ValueError(f"Unknown endpoint: {endpoint!r}. Expected 'copilot', 'azure', or 'trapi'.")
 
     # Max chars for the raw trajectory JSON sent to the LLM.
     # ~200K tokens ≈ 800K chars, leaving room for system prompt + response.
