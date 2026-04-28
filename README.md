@@ -20,7 +20,7 @@ Raw logs ──▶ Trajectory IR ──▶ Invariants ──▶ Checker ──�
 # Setup
 python -m venv .venv
 .venv/Scripts/activate          # Windows; use `source .venv/bin/activate` on Linux/Mac
-pip install -r requirements.txt
+pip install -e .                # installs agentrx + all dependencies
 cp .env.example .env            # Fill in your Azure or TRAPI endpoint details
 
 # Local dev: skip ManagedIdentity IMDS probe
@@ -31,6 +31,11 @@ python run.py trajectory.json
 
 # Specify domain explicitly
 python run.py trajectory.json --domain tau
+```
+
+You can also install directly from GitHub without cloning:
+```bash
+pip install git+https://github.com/microsoft/AgentRx.git
 ```
 
 All outputs are saved to `runs/<run_name>/`.
@@ -79,9 +84,12 @@ python run.py trajectory.json --stage report --run-dir runs/my_run
 ## Directory Structure
 
 ```
-agentverify/
-├── run.py                       # CLI entry point
-├── src/
+AgentRx/
+├── run.py                       # CLI entry point (backward-compatible)
+├── pyproject.toml               # Package configuration (pip install -e .)
+├── requirements.txt             # Python dependencies
+├── agentrx/                     # Main package
+│   ├── cli.py                   # Console script entry point
 │   ├── ir/                      # Trajectory IR normalization
 │   ├── invariants/              # Invariant generation & checking
 │   ├── judge/                   # LLM-as-a-Judge evaluation
@@ -151,26 +159,26 @@ Both endpoints use **Azure AD token-based auth** (`az login` or Managed Identity
 
 ## Running Individual Modules
 
-Each module can also be run standalone from `src/`:
+Each module can also be run standalone:
 
 **Static Invariant Generator** — generate policy/tool invariants:
 ```bash
-python src/invariants/static_invariant_generator.py --input-path trajectory.json --domain tau
+python agentrx/invariants/static_invariant_generator.py --input-path trajectory.json --domain tau
 ```
 
 **Dynamic Invariant Generator** — generate per-step context-aware invariants:
 ```bash
-python src/invariants/dynamic_invariant_generator.py --input-path trajectory.json --domain tau --mode stepbystep
+python agentrx/invariants/dynamic_invariant_generator.py --input-path trajectory.json --domain tau --mode stepbystep
 ```
 
 **Checker** — evaluate invariants against a trajectory:
 ```bash
-python src/invariants/checker.py --input-path trajectory.json --static-invariants static_inv.json --dynamic-invariants-dir dyn_inv/
+python agentrx/invariants/checker.py --input-path trajectory.json --static-invariants static_inv.json --dynamic-invariants-dir dyn_inv/
 ```
 
 **Judge** — run LLM-as-a-Judge classification:
 ```bash
-python src/judge/judge.py --domain tau --log_file trajectory.json --mode combined
+python agentrx/judge/judge.py --domain tau --log_file trajectory.json --mode combined
 ```
 
 ---
