@@ -25,7 +25,7 @@ Usage (run from src/ directory):
   python -m invariants.static_invariant_generator --domain magentic --input-path ../trajectories/magentic-one/trajectories/invent_new_info.json --out-path out/static.json --endpoint azure
 
 Also importable for the larger pipeline:
-  from invariants.static_invariant_generator import StaticInvariantGenerator
+  from agentrx.invariants.static_invariant_generator import StaticInvariantGenerator
 """
 import argparse
 import os
@@ -34,10 +34,10 @@ import time
 import datetime
 import traceback
 from typing import Any, Dict, List, Optional, Union, Set
-from llm_clients.trapi import LLMAgent as LLMAgentTrapi
-from llm_clients.azure import LLMAgent as LLMAgentAzure
-import pipeline.globals as g
-from invariants.domain_registry import get_domain_config, list_domains
+from agentrx.llm_clients.trapi import LLMAgent as LLMAgentTrapi
+from agentrx.llm_clients.azure import LLMAgent as LLMAgentAzure
+import agentrx.pipeline.globals as g
+from agentrx.invariants.domain_registry import get_domain_config, list_domains
 
 # ------------------------------------------------------------------------------------
 # CONFIG
@@ -766,7 +766,7 @@ class StaticInvariantGenerator:
         ensure_dir(os.path.dirname(self.out_path))
 
         if endpoint == "copilot":
-            from llm_clients.copilot_cli import copilot_mk_client
+            from agentrx.llm_clients.copilot_cli import copilot_mk_client
             self.client = copilot_mk_client()
             self.model_name = model_name or "copilot-cli"
             self._endpoint_url = "copilot-cli"
@@ -894,7 +894,7 @@ class StaticInvariantGenerator:
 
 if __name__ == "__main__":
     # Usage: see module docstring at top of file
-    from ir.trajectory_ir import load_trajectories
+    from agentrx.ir.trajectory_ir import load_trajectories
 
     available_domains = list_domains()
 

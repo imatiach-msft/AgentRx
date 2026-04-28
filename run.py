@@ -30,12 +30,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# Add src/ to path so all imports work regardless of cwd
 REPO_ROOT = Path(__file__).resolve().parent
-SRC_DIR = REPO_ROOT / "src"
-sys.path.insert(0, str(SRC_DIR))
 
-import pipeline.globals as g
+import agentrx.pipeline.globals as g
 
 # ---------- Stage definitions ----------
 
@@ -125,8 +122,8 @@ def validate_endpoint_config(endpoint: str):
 
 def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dict) -> str:
     """Normalize trajectory to IR format. Returns path to IR output."""
-    from ir.trajectory_ir import load_trajectories, validate_ir, markdown_ir
-    from invariants.domain_registry import get_domain_config
+    from agentrx.ir.trajectory_ir import load_trajectories, validate_ir, markdown_ir
+    from agentrx.invariants.domain_registry import get_domain_config
 
     banner("Stage 1/6: IR Normalization")
 
@@ -152,7 +149,7 @@ def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dic
     used_llm_fallback = False
     if _is_degenerate_ir(data, input_path):
         print("  [INFO] Domain converter produced degenerate IR — falling back to LLM-based converter")
-        from ir.trajectory_ir import llm_ir
+        from agentrx.ir.trajectory_ir import llm_ir
         data = llm_ir(raw, endpoint=endpoint)
         if not isinstance(data, list):
             data = [data]
@@ -186,8 +183,8 @@ def run_ir(input_path: str, run_dir: str, domain: str, endpoint: str, state: dic
 def run_static(input_path: str, run_dir: str, domain: str, endpoint: str,
                state: dict) -> str:
     """Generate static invariants. Returns path to output JSON."""
-    from invariants.static_invariant_generator import StaticInvariantGenerator
-    from invariants.domain_registry import get_domain_config
+    from agentrx.invariants.static_invariant_generator import StaticInvariantGenerator
+    from agentrx.invariants.domain_registry import get_domain_config
 
     banner("Stage 2/6: Static Invariant Generation")
 
@@ -239,8 +236,8 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
                 static_invariants_path: str, state: dict,
                 dynamic_mode: str = "stepbystep") -> str:
     """Generate dynamic invariants. Returns path to output directory."""
-    from invariants.dynamic_invariant_generator import DynamicInvariantGenerator, OneShotDynamicInvariantGenerator
-    from invariants.domain_registry import get_domain_config
+    from agentrx.invariants.dynamic_invariant_generator import DynamicInvariantGenerator, OneShotDynamicInvariantGenerator
+    from agentrx.invariants.domain_registry import get_domain_config
 
     mode_label = "one-shot" if dynamic_mode == "oneshot" else "step-by-step"
     banner(f"Stage 3/6: Dynamic Invariant Generation ({mode_label})")
@@ -291,9 +288,9 @@ def run_dynamic(input_path: str, run_dir: str, domain: str, endpoint: str,
 def run_check(ir_path: str, run_dir: str, domain: str, endpoint: str,
               static_invariants_path: str, dynamic_invariants_dir: str) -> str:
     """Check invariants against trajectory. Returns path to results directory."""
-    from invariants.checker import AllVerifier
-    from ir.trajectory_ir import load_trajectories
-    from invariants.domain_registry import get_domain_config
+    from agentrx.invariants.checker import AllVerifier
+    from agentrx.ir.trajectory_ir import load_trajectories
+    from agentrx.invariants.domain_registry import get_domain_config
 
     banner("Stage 4/6: Invariant Checking")
 
@@ -364,7 +361,7 @@ def run_check(ir_path: str, run_dir: str, domain: str, endpoint: str,
 def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
               violation_context_dir: str = None, ground_truth_file: str = None) -> str:
     """Run LLM-as-a-Judge. Returns path to judge output directory."""
-    import judge.judge as judge_module
+    import agentrx.judge.judge as judge_module
 
     banner("Stage 5/6: LLM-as-a-Judge")
 
@@ -400,7 +397,7 @@ def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
         gt_failures = judge_module.load_failures_from_json(ground_truth_file)
         print(f"  [DEBUG][run_judge] Loaded {len(gt_failures)} ground truth failures")
 
-    import pipeline.globals as g
+    import agentrx.pipeline.globals as g
     api_version = g.API_VERSION
     model_name = g.DEPLOYMENT if endpoint == "azure" else g.TRAPI_DEPLOYMENT_NAME
     print(f"  [DEBUG][run_judge] api_version:           {api_version}")
@@ -427,7 +424,7 @@ def run_judge(input_path: str, run_dir: str, domain: str, endpoint: str,
 
 def run_report(judge_out_dir: str, run_dir: str):
     """Generate failure frequency plots."""
-    from reports.analyze_failure_frequencies import (
+    from agentrx.reports.analyze_failure_frequencies import (
         load_and_analyze_json, plot_predicted_frequency,
         plot_ground_truth_frequency, plot_comparison,
     )

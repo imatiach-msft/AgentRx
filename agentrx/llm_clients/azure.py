@@ -2,8 +2,8 @@ import json
 import os
 import time
 from datetime import datetime
-import pipeline.globals as g
-import reports.metrics as metrics
+import agentrx.pipeline.globals as g
+import agentrx.reports.metrics as metrics
 
 from openai import AzureOpenAI
 from azure.identity import (

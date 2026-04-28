@@ -1,5 +1,5 @@
 import inspect
-import pipeline.globals as g
+import agentrx.pipeline.globals as g
 import os
 import re
 from typing import Dict, Optional
