@@ -415,15 +415,15 @@ def load_few_shot_examples():
                 with open(path, 'r') as f:
                     examples[category_num] = json.load(f)
                     loaded_count += 1
-                    print(f"[FEW-SHOT] ✓ Loaded example for category {category_num}: {filename}")
+                    print(f"[FEW-SHOT] [OK] Loaded example for category {category_num}: {filename}")
             except FileNotFoundError:
                 examples[category_num] = None
                 missing_count += 1
-                print(f"[FEW-SHOT] ✗ Missing example for category {category_num}: {filename}")
+                print(f"[FEW-SHOT] [MISS] Missing example for category {category_num}: {filename}")
             except json.JSONDecodeError as e:
                 examples[category_num] = None
                 missing_count += 1
-                print(f"[FEW-SHOT] ✗ Invalid JSON in example for category {category_num}: {filename} - {e}")
+                print(f"[FEW-SHOT] [ERR] Invalid JSON in example for category {category_num}: {filename} - {e}")
         else:
             examples[category_num] = None
             skipped_count += 1
@@ -999,16 +999,16 @@ def load_invariant_violation_context(task_id):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             context_data = json.load(f)
-            print(f"[CONTEXT] ✓ Loaded violation context for task {task_id}: {file_path}")
+            print(f"[CONTEXT] [OK] Loaded violation context for task {task_id}: {file_path}")
             return context_data
     except FileNotFoundError:
-        print(f"[CONTEXT] ✗ No violation context file found for task {task_id}: {file_path}")
+        print(f"[CONTEXT] [MISS] No violation context file found for task {task_id}: {file_path}")
         return None
     except json.JSONDecodeError as e:
-        print(f"[CONTEXT] ✗ Invalid JSON in context file for task {task_id}: {file_path} - {e}")
+        print(f"[CONTEXT] [ERR] Invalid JSON in context file for task {task_id}: {file_path} - {e}")
         return None
     except Exception as e:
-        print(f"[CONTEXT] ✗ Error reading context file for task {task_id}: {file_path} - {e}")
+        print(f"[CONTEXT] [ERR] Error reading context file for task {task_id}: {file_path} - {e}")
         return None
 
 def convert_to_failure_case(case_input):
@@ -1336,6 +1336,14 @@ def analysis(data, output_file_path=None, model_name=None, api_version=None):
             if os.path.exists(output_file_path):
                 with open(output_file_path, 'r') as f:
                     existing_data = json.load(f)
+                # Handle either format:
+                #   - list of per-task dicts (legacy)
+                #   - {"summary": ..., "detailed_results": [...]} (current)
+                if isinstance(existing_data, dict) and "detailed_results" in existing_data:
+                    existing_data = existing_data["detailed_results"]
+                # Fallback: if format is unexpected, prefer the freshly-computed `data`
+                if not isinstance(existing_data, list):
+                    existing_data = data
             else:
                 existing_data = data # Should match
 

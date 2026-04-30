@@ -59,39 +59,112 @@ def _refresh_path():
 
 def _find_copilot_bin() -> str:
     """Locate the real copilot binary, refreshing PATH if needed.
-    
-    Prefers copilot.exe over .ps1/.cmd wrappers on Windows, because
-    the VS Code bootstrapper (copilot.ps1) may shadow the real binary
-    and prompt interactively.
+
+    Cross-platform binary resolution:
+
+    On **Windows** there can be up to 4 different "copilot" entries on PATH:
+      1. VS Code bootstrapper (copilot.ps1 / .bat) — interactive, avoid
+      2. WinGet bootstrapper (copilot.exe ~100MB) — hangs without WinGet
+         runtime context, avoid
+      3. npm-installed shell script (copilot, no extension) — fine on POSIX
+      4. npm-installed cmd wrapper (copilot.cmd) — fine on Windows, this
+         is what we prefer
+
+    On **macOS / Linux** the npm global install puts a plain `copilot`
+    shell wrapper into one of:
+      - /usr/local/bin/copilot                    (Intel Mac, system npm)
+      - /opt/homebrew/bin/copilot                 (Apple Silicon Homebrew)
+      - $HOME/.npm-global/bin/copilot             (user-prefix npm)
+      - $HOME/.nvm/versions/node/*/bin/copilot    (nvm-managed node)
+
+    Priority order (all platforms):
+      a) AGENT_VERIFY_COPILOT_BIN env override (absolute path)
+      b) Platform-specific npm global locations (direct file check)
+      c) shutil.which() lookups
+      d) Last-resort fallbacks (with warnings on Windows)
     """
     import shutil
 
     # Always refresh PATH from registry first — Node/npm/winget installs
-    # done after Python started won't be visible otherwise
+    # done after Python started won't be visible otherwise (Windows only)
     _refresh_path()
 
-    # On Windows, look for the .exe explicitly to avoid the VS Code
-    # bootstrapper (.ps1) that requires interactive input
-    if sys.platform == "win32":
-        exe_path = shutil.which("copilot.exe")
-        if exe_path:
-            return exe_path
+    # 1. Explicit override (works on all platforms)
+    override = os.getenv("AGENT_VERIFY_COPILOT_BIN")
+    if override and os.path.exists(override):
+        return override
 
-    # Fallback to whatever "copilot" resolves to
+    if sys.platform == "win32":
+        # 2a. Direct check for npm global install on Windows
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            npm_cmd = os.path.join(appdata, "npm", "copilot.cmd")
+            if os.path.exists(npm_cmd):
+                return npm_cmd
+
+        # 3a. PATH lookup for .cmd (npm-style)
+        cmd_path = shutil.which("copilot.cmd")
+        if cmd_path:
+            return cmd_path
+
+        # 4a. .exe — only if not the WinGet shim
+        exe_path = shutil.which("copilot.exe")
+        if exe_path and "WinGet" not in exe_path:
+            return exe_path
+    else:
+        # 2b. Direct check for common npm global locations on macOS / Linux
+        home = os.path.expanduser("~")
+        candidates = [
+            "/usr/local/bin/copilot",
+            "/opt/homebrew/bin/copilot",
+            os.path.join(home, ".npm-global", "bin", "copilot"),
+            os.path.join(home, ".local", "bin", "copilot"),
+        ]
+        # nvm: pick the highest-version node bin if present
+        nvm_root = os.path.join(home, ".nvm", "versions", "node")
+        if os.path.isdir(nvm_root):
+            try:
+                nodes = sorted(os.listdir(nvm_root), reverse=True)
+                for node_ver in nodes:
+                    candidates.append(
+                        os.path.join(nvm_root, node_ver, "bin", "copilot")
+                    )
+            except OSError:
+                pass
+        for c in candidates:
+            if os.path.exists(c) and os.access(c, os.X_OK):
+                return c
+
+    # Fallback to whatever "copilot" resolves to via PATH (any OS)
     path = shutil.which("copilot")
     if path:
         return path
 
+    # Absolute last resort: WinGet exe (will likely hang, but better to
+    # surface a real error than silently fail)
+    if sys.platform == "win32":
+        exe_path = shutil.which("copilot.exe")
+        if exe_path:
+            print(f"[CopilotCLI] Warning: only WinGet shim found at {exe_path}; "
+                  f"install via `npm i -g @github/copilot` for reliability",
+                  file=sys.stderr)
+            return exe_path
+
     raise RuntimeError(
         "'copilot' CLI not found on PATH.\n"
-        "Install: https://docs.github.com/en/copilot/using-github-copilot/"
-        "using-github-copilot-in-the-command-line\n"
-        "Or:  winget install GitHub.Copilot"
+        "Install: npm install -g @github/copilot\n"
+        "Or set AGENT_VERIFY_COPILOT_BIN to the full path."
     )
 
 
 def _verify_cli():
-    """Check once that the copilot binary is reachable."""
+    """Check once that the copilot binary is reachable.
+
+    Cold-start of copilot.exe can take 30-60s on first invocation (loading
+    Node, auth check, etc.), so we use a generous timeout. If --version
+    hangs, we still mark the binary as verified — _call_cli has its own
+    timeout and will surface real failures there.
+    """
     global _CLI_VERIFIED, _COPILOT_BIN
     if _CLI_VERIFIED:
         return
@@ -102,7 +175,8 @@ def _verify_cli():
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            timeout=15,
+            stdin=subprocess.DEVNULL,  # never let CLI block on stdin
+            timeout=60,
         )
         if result.returncode == 0:
             print(f"[CopilotCLI] Found: {result.stdout.strip()}")
@@ -113,6 +187,11 @@ def _verify_cli():
         raise RuntimeError(
             f"'copilot' binary not executable at: {_COPILOT_BIN}"
         )
+    except subprocess.TimeoutExpired:
+        # Don't abort the whole pipeline just because --version is slow.
+        # Real LLM calls have their own (longer) timeouts.
+        print(f"[CopilotCLI] Warning: --version timed out; continuing anyway "
+              f"(binary at {_COPILOT_BIN})", file=sys.stderr)
     _CLI_VERIFIED = True
 
 

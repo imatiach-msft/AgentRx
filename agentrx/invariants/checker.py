@@ -236,16 +236,30 @@ class AllVerifier:
 
         out: List[Dict[str, Any]] = []
 
+        def _looks_like_invariant(d: Dict[str, Any]) -> bool:
+            # Real invariants have these fields; per-step wrappers do not.
+            return isinstance(d, dict) and (
+                "assertion_name" in d or "event_trigger" in d or "check_type" in d
+            )
+
         def add_payload(x: Any) -> None:
             if x is None:
                 return
             if isinstance(x, dict):
+                # If this is a per-step wrapper {step_num, decision, invariant: [...]},
+                # recurse into the nested 'invariant'/'invariants' list. Otherwise
+                # treat the dict as a leaf invariant object.
+                if not _looks_like_invariant(x) and (
+                    "invariant" in x or "invariants" in x
+                ):
+                    add_payload(x.get("invariant"))
+                    add_payload(x.get("invariants"))
+                    return
                 out.append(x)
                 return
             if isinstance(x, list):
                 for y in x:
-                    if isinstance(y, dict):
-                        out.append(y)
+                    add_payload(y)
 
         # Load static invariants from static_invariants_used (stored as JSON string)
         static_str = data.get("static_invariants_used")
@@ -342,28 +356,37 @@ class AllVerifier:
 
     def _step_matches_trigger(self, trig_step: Any, step_pos: int, step_obj: Dict[str, Any]) -> bool:
         """
-        We DO NOT rewrite trigger.step_index. But to avoid obvious off-by-one pains,
-        we accept a match if:
-          - trigger_step == step_pos
-          - OR trigger_step == step_pos + 1
-          - OR trigger_step == step_obj.get("index") (if present and int-ish)
-          - OR trigger_step is a range like "20-21" and step_pos/index falls in it
+        Match a trigger.step_index against the current step.
+
+        The dynamic-invariant generator is shown the IR with each step's
+        ``index`` field (1-indexed) and emits ``trigger.step_index`` using
+        that same numbering.  So when the step has an ``index`` field, that
+        is the authoritative match — we MUST NOT also accept ``step_pos``
+        (0-indexed) or ``step_pos + 1`` because that would make every
+        trigger fire at two adjacent steps (off-by-one duplicates).
+
+        Match semantics (in priority order):
+          1. trigger in (None, "", "*")           -> always match
+          2. step_obj has int ``index``           -> match iff trigger == index
+          3. step_obj has no usable ``index``     -> fall back to step_pos
+                                                     OR step_pos + 1 (legacy
+                                                     IR without index field)
+          4. trigger is a range "lo-hi"           -> apply same precedence
         """
         if trig_step in (None, "", "*"):
             return True
 
         step_index_field = safe_int(step_obj.get("index"))
 
-        # Try simple integer match first
+        # Try simple integer match
         t = safe_int(trig_step)
         if t is not None:
-            if t == step_pos:
-                return True
-            if t == step_pos + 1:
-                return True
-            if step_index_field is not None and t == step_index_field:
-                return True
-            return False
+            if step_index_field is not None:
+                # Authoritative path: IR has 1-indexed `index`, only match
+                # against it. No off-by-one fallback.
+                return t == step_index_field
+            # Legacy IR (no `index`): permissive 0-/1-indexed fallback
+            return t == step_pos or t == step_pos + 1
 
         # Handle range triggers like "20-21", "15-20"
         trig_str = str(trig_step).strip()
@@ -372,13 +395,10 @@ class AllVerifier:
             lo = safe_int(parts[0].strip())
             hi = safe_int(parts[1].strip())
             if lo is not None and hi is not None:
-                # Check both step_pos (0-based) and step.index (1-based)
-                if lo <= step_pos <= hi:
-                    return True
-                if lo <= step_pos + 1 <= hi:
-                    return True
-                if step_index_field is not None and lo <= step_index_field <= hi:
-                    return True
+                if step_index_field is not None:
+                    return lo <= step_index_field <= hi
+                # Legacy IR fallback
+                return (lo <= step_pos <= hi) or (lo <= step_pos + 1 <= hi)
 
         return False
 
@@ -1233,13 +1253,21 @@ def main():
         }
 
         # Initialize the dynamic verifier if dynamic invariants for that trajectory exist, else skip dynamic invariant verification
-        dynamic_invariants_file = os.path.join(dynamic_invariants_dir, f"out_{task_id}.json")
+        # Try both step-by-step (out_{id}.json) and one-shot (out_{id}_oneshot.json) filenames.
+        dynamic_invariants_file = None
+        for candidate in (
+            os.path.join(dynamic_invariants_dir, f"out_{task_id}.json"),
+            os.path.join(dynamic_invariants_dir, f"out_{task_id}_oneshot.json"),
+        ):
+            if os.path.exists(candidate):
+                dynamic_invariants_file = candidate
+                break
         dynamic_verifier = None
-        if os.path.exists(dynamic_invariants_file):
+        if dynamic_invariants_file:
             print(f"Using dynamic invariants file: {dynamic_invariants_file} for task_id={task_id}")
             dynamic_verifier = AllVerifier(invariants_path=dynamic_invariants_file, policy_document_path=policy_document_path, client=args.client)
         else:
-            dbg(f"Dynamic invariants file not found: {dynamic_invariants_file}, skipping dynamic verification for task_id={task_id}")
+            dbg(f"Dynamic invariants file not found for task_id={task_id} in {dynamic_invariants_dir}, skipping dynamic verification")
 
         dbg(f"=== TRAJ {i} task_id={task_id} trajectory_id={traj.get('trajectory_id')!r} ===")
 
