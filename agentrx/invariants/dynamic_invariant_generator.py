@@ -50,8 +50,8 @@ CLI flags:
   --include-nl-check / --no-nl-check  Enable/disable NL check invariants (default: enabled)
 
 Also importable for the larger pipeline:
-  from invariants.dynamic_invariant_generator import DynamicInvariantGenerator
-  from invariants.dynamic_invariant_generator import OneShotDynamicInvariantGenerator
+  from agentrx.invariants.dynamic_invariant_generator import DynamicInvariantGenerator
+  from agentrx.invariants.dynamic_invariant_generator import OneShotDynamicInvariantGenerator
 """
 import os
 import json
@@ -61,12 +61,12 @@ import datetime
 import argparse
 from typing import Any, Dict, List, Optional, Set, Union, Tuple
 
-from ir.trajectory_ir import tau_bench_ir, flash_ir, magentic_ir, load_trajectories
-from llm_clients.trapi import LLMAgent as LLMAgentTrapi
-from llm_clients.azure import LLMAgent as LLMAgentAzure
-import pipeline.globals as g
+from agentrx.ir.trajectory_ir import tau_bench_ir, flash_ir, magentic_ir, load_trajectories
+from agentrx.llm_clients.trapi import LLMAgent as LLMAgentTrapi
+from agentrx.llm_clients.azure import LLMAgent as LLMAgentAzure
+import agentrx.pipeline.globals as g
 
-from reports.metrics import TokenUsage, TimingInfo, LLMCallTelemetry  # noqa: F401
+from agentrx.reports.metrics import TokenUsage, TimingInfo, LLMCallTelemetry  # noqa: F401
 
 _RATE_LIMIT_RETRIES = 5
 _RATE_LIMIT_BACKOFF = 4  # seconds
@@ -1866,7 +1866,7 @@ class DynamicInvariantGenerator:
         self.include_nl_check = include_nl_check
 
         if endpoint == "copilot":
-            from llm_clients.copilot_cli import copilot_mk_client
+            from agentrx.llm_clients.copilot_cli import copilot_mk_client
             self.client = copilot_mk_client()
             self.model_name = model_name or "copilot-cli"
         elif endpoint == "azure":
@@ -2154,7 +2154,7 @@ class OneShotDynamicInvariantGenerator:
         self.include_nl_check = include_nl_check
 
         if endpoint == "copilot":
-            from llm_clients.copilot_cli import copilot_mk_client
+            from agentrx.llm_clients.copilot_cli import copilot_mk_client
             self.client = copilot_mk_client()
             self.model_name = model_name or "copilot-cli"
         elif endpoint == "azure":

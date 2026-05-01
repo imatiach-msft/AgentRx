@@ -6,7 +6,7 @@ load_dotenv()
 from azure.ai.inference import ChatCompletionsClient
 from openai.lib.azure import AzureOpenAI
 from openai import RateLimitError
-import pipeline.globals as g
+import agentrx.pipeline.globals as g
 from azure.identity import (
     ChainedTokenCredential,
     AzureCliCredential,

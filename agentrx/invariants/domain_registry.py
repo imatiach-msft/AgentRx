@@ -7,7 +7,7 @@ requires changes in exactly ONE place (this file) plus an IR converter
 function in ir/trajectory_ir.py.
 
 Usage:
-    from invariants.domain_registry import DOMAIN_REGISTRY, get_domain_config, list_domains
+    from agentrx.invariants.domain_registry import DOMAIN_REGISTRY, get_domain_config, list_domains
 
     cfg = get_domain_config("tau")
     print(cfg.tools_list)
@@ -29,7 +29,7 @@ _IR_CONVERTERS: Dict[str, Callable] = {}
 def _get_ir_converter(name: str) -> Callable:
     """Lazily import and cache an IR converter function by name."""
     if name not in _IR_CONVERTERS:
-        from ir.trajectory_ir import tau_bench_ir, flash_ir, magentic_ir, llm_ir  # noqa: F811
+        from agentrx.ir.trajectory_ir import tau_bench_ir, flash_ir, magentic_ir, llm_ir  # noqa: F811
         _IR_CONVERTERS.update({
             "tau_bench_ir": tau_bench_ir,
             "flash_ir": flash_ir,

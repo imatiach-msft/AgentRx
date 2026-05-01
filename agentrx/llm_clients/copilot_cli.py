@@ -22,10 +22,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import List, Dict, Optional
 
-import pipeline.globals as g
+import agentrx.pipeline.globals as g
 
 try:
-    import reports.metrics as metrics
+    import agentrx.reports.metrics as metrics
 except ImportError:
     metrics = None
 

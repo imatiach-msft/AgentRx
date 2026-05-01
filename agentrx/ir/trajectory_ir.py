@@ -375,7 +375,7 @@ def ensure_ir(path: str, domain: str) -> list:
         return data
 
     # Not IR yet – run the domain converter
-    from invariants.domain_registry import get_domain_config
+    from agentrx.invariants.domain_registry import get_domain_config
     raw = load_trajectories(path)
     converted = get_domain_config(domain).ir_converter(raw)
     if not isinstance(converted, list):
@@ -663,18 +663,18 @@ def llm_ir(
     the response, validates with validate_ir(), and retries (feeding the
     validation error back) until success or max_retries is exhausted.
     """
-    import pipeline.globals as g
+    import agentrx.pipeline.globals as g
 
     if endpoint == "copilot":
-        from llm_clients.copilot_cli import copilot_mk_client
+        from agentrx.llm_clients.copilot_cli import copilot_mk_client
         client = copilot_mk_client()
         model = "copilot-cli"
     elif endpoint == "azure":
-        from llm_clients.azure import LLMAgent as LLMAgentAzure
+        from agentrx.llm_clients.azure import LLMAgent as LLMAgentAzure
         client = LLMAgentAzure.azure_mk_client()
         model = g.DEPLOYMENT
     elif endpoint == "trapi":
-        from llm_clients.trapi import LLMAgent as LLMAgentTrapi
+        from agentrx.llm_clients.trapi import LLMAgent as LLMAgentTrapi
         client = LLMAgentTrapi.trapi_mk_client()
         model = g.TRAPI_DEPLOYMENT_NAME
     else:

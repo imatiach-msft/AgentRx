@@ -41,16 +41,16 @@ from dataclasses import dataclass, asdict
 import types
 from typing import Any, Dict, List, Optional, Tuple, Union
 from xml import dom
-from invariants.static_invariant_generator import (
+from agentrx.invariants.static_invariant_generator import (
     RUBRIC_EVALUATION_ALGORITHM,
     OUTPUT_FORMAT,
     NL_CHECK_JUDGE_SYSTEM_PROMPT
 )
-from llm_clients.trapi import LLMAgent as LLMAgentTrapi
-from llm_clients.azure import LLMAgent as LLMAgentAzure
+from agentrx.llm_clients.trapi import LLMAgent as LLMAgentTrapi
+from agentrx.llm_clients.azure import LLMAgent as LLMAgentAzure
 
-from ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir
-import pipeline.globals as g
+from agentrx.ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir
+import agentrx.pipeline.globals as g
 
 # ------------------------------------------------------------------------------------
 # CONFIG
@@ -196,7 +196,7 @@ class AllVerifier:
                 dbg(f"      check_type_field={inv.get('check_type')!r} check_field={inv.get('check')!r} inferred={self._infer_check_type(inv)!r}")
 
         if self.client == "copilot":
-            from llm_clients.copilot_cli import copilot_mk_client
+            from agentrx.llm_clients.copilot_cli import copilot_mk_client
             self.llm_client = copilot_mk_client()
             self.model_name = "copilot-cli"
         elif self.client == "azure":

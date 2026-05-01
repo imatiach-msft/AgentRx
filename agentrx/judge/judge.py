@@ -24,16 +24,16 @@ from typing import List, Optional, Dict, Any
 
 # --- Imports from agent_verify framework ---
 try:
-    import pipeline.globals as g
-    from llm_clients.azure import LLMAgent as LLMAgentAzure
-    from llm_clients.trapi import LLMAgent as LLMAgentTrapi
+    import agentrx.pipeline.globals as g
+    from agentrx.llm_clients.azure import LLMAgent as LLMAgentAzure
+    from agentrx.llm_clients.trapi import LLMAgent as LLMAgentTrapi
     # Add metrics if available
-    import reports.metrics as metrics
+    import agentrx.reports.metrics as metrics
     
     # Analysis & Pipeline tools
-    from reports.analyze_failure_frequencies import load_and_analyze_json, plot_predicted_frequency, plot_ground_truth_frequency, plot_comparison
-    from ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir, validate_ir, llm_ir, ensure_ir
-    from invariants.domain_registry import DOMAIN_REGISTRY, get_domain_config, register_domain
+    from agentrx.reports.analyze_failure_frequencies import load_and_analyze_json, plot_predicted_frequency, plot_ground_truth_frequency, plot_comparison
+    from agentrx.ir.trajectory_ir import tau_bench_ir, load_trajectories, flash_ir, magentic_ir, validate_ir, llm_ir, ensure_ir
+    from agentrx.invariants.domain_registry import DOMAIN_REGISTRY, get_domain_config, register_domain
 except ImportError:
     pass
 
@@ -499,7 +499,7 @@ def build_taxonomy_text(mode):
 # {invariants_violation_context} placeholders.  Use double-braces {{ }} to
 # escape literal braces in the JSON examples.
 #
-# Matches the 5 active templates from judge.py:
+# Matches the 5 active templates from agentrx.judge.py:
 #   _TMPL_VIOLATIONS_BEFORE  ↔  BASE_SYSTEM_PROMPT_VIOLATIONS_BEFORE
 #   _TMPL_NO_CONTEXT         ↔  BASE_SYSTEM_PROMPT
 #   _TMPL_WITH_CONTEXT       ↔  BASE_SYSTEM_PROMPT_WITH_CONTEXT
@@ -819,7 +819,7 @@ def _normalize_by_domain(domain: str, raw):
 
 def get_llm_judge_class():
     if ENDPOINT_USED == "copilot":
-        from llm_clients.copilot_cli import LLMAgent as LLMAgentCopilot
+        from agentrx.llm_clients.copilot_cli import LLMAgent as LLMAgentCopilot
         base_class = LLMAgentCopilot
     elif ENDPOINT_USED == "azure":
         base_class = LLMAgentAzure
