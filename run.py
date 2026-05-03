@@ -30,6 +30,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Force UTF-8 stdout/stderr on Windows so emoji/unicode prints don't crash
+# the pipeline with UnicodeEncodeError (cp1252 default)
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 REPO_ROOT = Path(__file__).resolve().parent
 
 import agentrx.pipeline.globals as g
@@ -332,8 +340,16 @@ def run_check(ir_path: str, run_dir: str, domain: str, endpoint: str,
 
         # Dynamic check (if dynamic invariants exist for this trajectory)
         if dynamic_invariants_dir:
-            dyn_file = os.path.join(dynamic_invariants_dir, f"out_{task_id}.json")
-            if os.path.exists(dyn_file):
+            # Try both step-by-step (out_{id}.json) and one-shot (out_{id}_oneshot.json) names
+            dyn_file = None
+            for cand in (
+                os.path.join(dynamic_invariants_dir, f"out_{task_id}.json"),
+                os.path.join(dynamic_invariants_dir, f"out_{task_id}_oneshot.json"),
+            ):
+                if os.path.exists(cand):
+                    dyn_file = cand
+                    break
+            if dyn_file:
                 dyn_verifier = AllVerifier(
                     invariants_path=dyn_file,
                     policy_document_path=policy_path,
@@ -515,6 +531,8 @@ Examples:
                         help="Run ONLY this stage")
     parser.add_argument("--from-stage", default=None, choices=STAGES,
                         help="Resume from this stage (skips earlier stages)")
+    parser.add_argument("--skip-static", action="store_true",
+                        help="Skip static invariant generation (use empty static set; only dynamic invariants will drive checking)")
     parser.add_argument("--skip-dynamic", action="store_true",
                         help="Skip dynamic invariant generation (faster)")
     parser.add_argument("--dynamic-mode", default="stepbystep", choices=["stepbystep", "oneshot"],
@@ -619,6 +637,8 @@ def run_pipeline(input_path: str, args):
 
     if args.skip_dynamic:
         stages_to_run = [s for s in stages_to_run if s != "dynamic"]
+    if args.skip_static:
+        stages_to_run = [s for s in stages_to_run if s != "static"]
     if args.skip_judge:
         stages_to_run = [s for s in stages_to_run if s not in ("judge", "report")]
     # Print plan
@@ -654,10 +674,17 @@ def run_pipeline(input_path: str, args):
             state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"static"})
             save_state(run_dir, state)
         elif not os.path.exists(static_inv_path) and any(s in stages_to_run for s in ["check", "dynamic"]):
-            print("[INFO] Running static invariant stage (required by later stages)")
-            static_inv_path = run_static(input_path, run_dir, domain, args.endpoint, state)
-            state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"static"})
-            save_state(run_dir, state)
+            if args.skip_static:
+                print("[INFO] --skip-static set: writing empty static_invariants.json")
+                with open(static_inv_path, "w", encoding="utf-8") as f:
+                    json.dump({"invariants": []}, f, indent=2)
+                state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"static"})
+                save_state(run_dir, state)
+            else:
+                print("[INFO] Running static invariant stage (required by later stages)")
+                static_inv_path = run_static(input_path, run_dir, domain, args.endpoint, state)
+                state["completed_stages"] = list(set(state.get("completed_stages", [])) | {"static"})
+                save_state(run_dir, state)
 
         # --- Dynamic Invariants ---
         if "dynamic" in stages_to_run:
